@@ -6,32 +6,18 @@
 
 Detect prunable override entries in pnpm / [aube](https://github.com/endevco/aube) projects.
 
-## Install
-
-```bash
-pnpm add -g pnpm-override-prune
-# or
-aube add -g pnpm-override-prune
-```
-
-Or run without installing:
-
-```bash
-pnpm dlx pnpm-override-prune
-# or
-aube dlx pnpm-override-prune
-```
-
 ## Usage
 
 ```bash
 # Detect prunable entries (default)
-pnpm-override-prune                          # checks ./package.json
-pnpm-override-prune path/to/package.json     # checks given file
+pnpm dlx pnpm-override-prune                          # checks ./package.json
+pnpm dlx pnpm-override-prune path/to/package.json     # checks given file
 
 # Remove prunable entries in place
-pnpm-override-prune --fix
+pnpm dlx pnpm-override-prune --fix
 ```
+
+For aube users, replace `pnpm dlx` with `aube dlx`.
 
 Example output:
 
