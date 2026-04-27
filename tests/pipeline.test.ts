@@ -1,0 +1,382 @@
+import { describe, expect, it } from "bun:test";
+import type { Lockfile } from "../src/lockfile.ts";
+import type { Override } from "../src/manifest.ts";
+import {
+  collectNeededRegistryPackages,
+  collectPackagesForOverride,
+  evaluateOverride,
+  gatherSpecsForTarget,
+} from "../src/pipeline.ts";
+import type { PackageMetadata } from "../src/registry.ts";
+
+function makeLockfile(args: {
+  direct?: Record<string, { specifier: string; version: string }>;
+  transitive?: Record<string, Array<{ parent: string; resolved: string }>>;
+}): Lockfile {
+  const directMap = new Map<
+    string,
+    {
+      importerKey: string;
+      depType: "dependencies";
+      specifier: string;
+      resolvedVersion: string;
+    }[]
+  >();
+  for (const [name, dep] of Object.entries(args.direct ?? {})) {
+    directMap.set(name, [
+      {
+        importerKey: ".",
+        depType: "dependencies",
+        specifier: dep.specifier,
+        resolvedVersion: dep.version,
+      },
+    ]);
+  }
+  const transMap = new Map<
+    string,
+    { parentKey: string; resolvedVersion: string }[]
+  >();
+  for (const [target, parents] of Object.entries(args.transitive ?? {})) {
+    transMap.set(
+      target,
+      parents.map((p) => ({
+        parentKey: p.parent,
+        resolvedVersion: p.resolved,
+      })),
+    );
+  }
+  return {
+    version: "9.0",
+    directRequirements: directMap,
+    transitiveParents: transMap,
+  };
+}
+
+function makeMetadata(
+  name: string,
+  versions: Record<string, Record<string, string>>,
+): PackageMetadata {
+  const map = new Map<
+    string,
+    { version: string; dependencies: ReadonlyMap<string, string> }
+  >();
+  for (const [version, deps] of Object.entries(versions)) {
+    map.set(version, {
+      version,
+      dependencies: new Map(Object.entries(deps)),
+    });
+  }
+  return { name, versions: map };
+}
+
+const PKG_OVERRIDE = (key: string, spec: string): Override => ({
+  key,
+  spec,
+  source: "package.json:pnpm.overrides",
+});
+
+describe("gatherSpecsForTarget", () => {
+  it("collects specifiers from direct requirements", () => {
+    const lockfile = makeLockfile({
+      direct: { foo: { specifier: "^1.0.0", version: "1.5.0" } },
+    });
+    expect(gatherSpecsForTarget("foo", lockfile, new Map())).toEqual([
+      "^1.0.0",
+    ]);
+  });
+
+  it("collects specs from transitive parents via registry data", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        target: [
+          { parent: "parentA@1.0.0", resolved: "1.0.0" },
+          { parent: "parentB@2.0.0", resolved: "1.0.0" },
+        ],
+      },
+    });
+    const registry = new Map<string, PackageMetadata>([
+      ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.0.0" } })],
+      ["parentB", makeMetadata("parentB", { "2.0.0": { target: "<2.0.0" } })],
+    ]);
+    expect(gatherSpecsForTarget("target", lockfile, registry)).toEqual([
+      ">=1.0.0",
+      "<2.0.0",
+    ]);
+  });
+
+  it("combines direct and transitive specs", () => {
+    const lockfile = makeLockfile({
+      direct: { target: { specifier: "^1.0.0", version: "1.5.0" } },
+      transitive: {
+        target: [{ parent: "parentA@1.0.0", resolved: "1.5.0" }],
+      },
+    });
+    const registry = new Map<string, PackageMetadata>([
+      ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.2.0" } })],
+    ]);
+    expect(gatherSpecsForTarget("target", lockfile, registry)).toEqual([
+      "^1.0.0",
+      ">=1.2.0",
+    ]);
+  });
+
+  it("skips parents whose snapshot key cannot be parsed", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        target: [{ parent: "no-at-sign", resolved: "1.0.0" }],
+      },
+    });
+    expect(gatherSpecsForTarget("target", lockfile, new Map())).toEqual([]);
+  });
+
+  it("skips parents whose registry metadata is missing", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        target: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
+      },
+    });
+    expect(gatherSpecsForTarget("target", lockfile, new Map())).toEqual([]);
+  });
+
+  it("skips parents whose version meta is missing", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        target: [{ parent: "parentA@9.9.9", resolved: "1.0.0" }],
+      },
+    });
+    const registry = new Map<string, PackageMetadata>([
+      ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.0.0" } })],
+    ]);
+    expect(gatherSpecsForTarget("target", lockfile, registry)).toEqual([]);
+  });
+
+  it("skips parents that don't list the target in their dependencies", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        target: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
+      },
+    });
+    const registry = new Map<string, PackageMetadata>([
+      ["parentA", makeMetadata("parentA", { "1.0.0": { other: ">=1.0.0" } })],
+    ]);
+    expect(gatherSpecsForTarget("target", lockfile, registry)).toEqual([]);
+  });
+
+  it("returns empty array when target is not present anywhere", () => {
+    expect(
+      gatherSpecsForTarget("missing", makeLockfile({}), new Map()),
+    ).toEqual([]);
+  });
+});
+
+describe("evaluateOverride", () => {
+  it("skips entries categorized as nested-key with a reason", () => {
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo>bar", ">=1.0.0"),
+      makeLockfile({}),
+      new Map(),
+    );
+    expect(result).toEqual({ status: "skip", value: "(nested key)" });
+  });
+
+  it("skips entries with protocol-prefixed spec", () => {
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", "catalog:default"),
+      makeLockfile({}),
+      new Map(),
+    );
+    expect(result).toEqual({ status: "skip", value: "(protocol spec)" });
+  });
+
+  it("skips entries with non-lower-bound spec", () => {
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", "^1.0.0"),
+      makeLockfile({}),
+      new Map(),
+    );
+    expect(result).toEqual({ status: "skip", value: "(non-lower-bound)" });
+  });
+
+  it("prunes entries with no surviving constraints (unused)", () => {
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=1.0.0"),
+      makeLockfile({}),
+      new Map(),
+    );
+    expect(result).toEqual({ status: "prune", value: "(unused)" });
+  });
+
+  it("returns error when target has no registry metadata", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
+      },
+    });
+    const registry = new Map<string, PackageMetadata>([
+      ["parentA", makeMetadata("parentA", { "1.0.0": { foo: "^1.0.0" } })],
+    ]);
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=1.0.0"),
+      lockfile,
+      registry,
+    );
+    expect(result).toEqual({ status: "error", value: "(registry miss)" });
+  });
+
+  it("prunes when natural resolution satisfies the override floor", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "parentA@1.0.0", resolved: "2.5.0" }],
+      },
+    });
+    const registry = new Map<string, PackageMetadata>([
+      ["parentA", makeMetadata("parentA", { "1.0.0": { foo: ">=2.0.0" } })],
+      [
+        "foo",
+        makeMetadata("foo", {
+          "1.0.0": {},
+          "2.0.0": {},
+          "2.5.0": {},
+        }),
+      ],
+    ]);
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=2.0.0"),
+      lockfile,
+      registry,
+    );
+    expect(result).toEqual({ status: "prune", value: "2.5.0" });
+  });
+
+  it("keeps when natural resolution falls below the override floor", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "parentA@1.0.0", resolved: "1.5.0" }],
+      },
+    });
+    const registry = new Map<string, PackageMetadata>([
+      ["parentA", makeMetadata("parentA", { "1.0.0": { foo: "^1.0.0" } })],
+      [
+        "foo",
+        makeMetadata("foo", {
+          "1.0.0": {},
+          "1.5.0": {},
+          "2.0.0": {},
+        }),
+      ],
+    ]);
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=2.0.0"),
+      lockfile,
+      registry,
+    );
+    expect(result).toEqual({ status: "keep", value: "1.5.0" });
+  });
+});
+
+describe("collectPackagesForOverride", () => {
+  it("returns an empty list for skip-categorized overrides", () => {
+    expect(
+      collectPackagesForOverride(
+        PKG_OVERRIDE("foo", "^1.0.0"),
+        makeLockfile({}),
+      ),
+    ).toEqual([]);
+  });
+
+  it("returns just the target when there are no transitive parents", () => {
+    expect(
+      collectPackagesForOverride(
+        PKG_OVERRIDE("foo", ">=1.0.0"),
+        makeLockfile({}),
+      ),
+    ).toEqual(["foo"]);
+  });
+
+  it("includes parent names parsed from snapshot keys", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [
+          { parent: "parentA@1.0.0", resolved: "1.0.0" },
+          { parent: "parentB@2.0.0", resolved: "1.0.0" },
+        ],
+      },
+    });
+    expect(
+      new Set(
+        collectPackagesForOverride(PKG_OVERRIDE("foo", ">=1.0.0"), lockfile),
+      ),
+    ).toEqual(new Set(["foo", "parentA", "parentB"]));
+  });
+
+  it("ignores parents whose snapshot key cannot be parsed", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "broken-no-at", resolved: "1.0.0" }],
+      },
+    });
+    expect(
+      collectPackagesForOverride(PKG_OVERRIDE("foo", ">=1.0.0"), lockfile),
+    ).toEqual(["foo"]);
+  });
+});
+
+describe("collectNeededRegistryPackages", () => {
+  it("includes target and parent names for each target override", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [
+          { parent: "parentA@1.0.0", resolved: "1.0.0" },
+          { parent: "parentB@2.0.0", resolved: "1.0.0" },
+        ],
+      },
+    });
+    const overrides: Override[] = [PKG_OVERRIDE("foo", ">=1.0.0")];
+    const needed = collectNeededRegistryPackages(overrides, lockfile);
+    expect(new Set(needed)).toEqual(new Set(["foo", "parentA", "parentB"]));
+  });
+
+  it("skips overrides categorized as skip", () => {
+    const overrides: Override[] = [
+      PKG_OVERRIDE("foo>bar", ">=1.0.0"),
+      PKG_OVERRIDE("baz", "^1.0.0"),
+    ];
+    expect(collectNeededRegistryPackages(overrides, makeLockfile({}))).toEqual(
+      [],
+    );
+  });
+
+  it("dedupes when the same parent appears across overrides", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
+        bar: [{ parent: "parentA@1.0.0", resolved: "2.0.0" }],
+      },
+    });
+    const overrides: Override[] = [
+      PKG_OVERRIDE("foo", ">=1.0.0"),
+      PKG_OVERRIDE("bar", ">=2.0.0"),
+    ];
+    const needed = collectNeededRegistryPackages(overrides, lockfile);
+    expect(new Set(needed)).toEqual(new Set(["foo", "bar", "parentA"]));
+  });
+
+  it("skips parents whose snapshot keys can't be parsed", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "broken-no-at", resolved: "1.0.0" }],
+      },
+    });
+    const overrides: Override[] = [PKG_OVERRIDE("foo", ">=1.0.0")];
+    expect(new Set(collectNeededRegistryPackages(overrides, lockfile))).toEqual(
+      new Set(["foo"]),
+    );
+  });
+
+  it("handles target without transitive parents", () => {
+    const overrides: Override[] = [PKG_OVERRIDE("foo", ">=1.0.0")];
+    expect(collectNeededRegistryPackages(overrides, makeLockfile({}))).toEqual([
+      "foo",
+    ]);
+  });
+});
