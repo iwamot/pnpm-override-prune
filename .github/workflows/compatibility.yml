@@ -10,33 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  per-node:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        node: ['20', '22', '24']
-    permissions:
-      contents: read
-    env:
-      MISE_NODE_VERSION: ${{ matrix.node }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: jdx/mise-action@1648a7812b9aeae629881980618f079932869151 # v4.0.1
-        with:
-          experimental: true
-          cache: false
-          install: false
-      - run: bash compatibility.sh
-
   compatibility:
-    needs:
-      - per-node
-    runs-on: ubuntu-latest
-    timeout-minutes: 1
-    permissions: {}
-    steps:
-      - run: 'true'
+    uses: iwamot/workflows/.github/workflows/compatibility-node.yml@d1fbf4d009ef835741c9801626f014ef90a7dac2 # v1.4.0
+    with:
+      node-versions: '["20","22","24"]'
