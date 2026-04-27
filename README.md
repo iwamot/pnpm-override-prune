@@ -9,6 +9,14 @@ Detect prunable override entries in pnpm / [aube](https://github.com/endevco/aub
 ## Install
 
 ```bash
+pnpm add -g pnpm-override-prune
+# or
+aube add -g pnpm-override-prune
+```
+
+Or run without installing:
+
+```bash
 pnpm dlx pnpm-override-prune
 # or
 aube dlx pnpm-override-prune
