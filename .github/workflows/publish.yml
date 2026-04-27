@@ -28,8 +28,4 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           npm pkg set version="$VERSION"
       - run: aube run build
-      - run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          npm publish --provenance --access public
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish --provenance --access public
