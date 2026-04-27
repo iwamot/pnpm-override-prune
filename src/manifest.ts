@@ -12,6 +12,27 @@ export interface Override {
   readonly source: OverrideSource;
 }
 
+export type DirectDepType =
+  | "dependencies"
+  | "devDependencies"
+  | "peerDependencies"
+  | "optionalDependencies";
+
+const DIRECT_DEP_FIELDS: readonly DirectDepType[] = [
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+];
+
+export interface DirectDep {
+  readonly importerKey: string;
+  readonly depType: DirectDepType;
+  readonly spec: string;
+}
+
+export type WorkspaceDirectDeps = ReadonlyMap<string, readonly DirectDep[]>;
+
 export class MalformedManifestError extends Error {
   override readonly name = "MalformedManifestError";
   constructor(message: string) {
@@ -70,6 +91,44 @@ export function parsePackageJsonOverrides(
     );
   }
   return result;
+}
+
+export function buildWorkspaceDirectDeps(
+  importerContents: ReadonlyMap<string, string>,
+): WorkspaceDirectDeps {
+  const map = new Map<string, DirectDep[]>();
+  for (const [importerKey, content] of importerContents) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      throw new MalformedManifestError(
+        e instanceof Error ? e.message : "json parse error",
+      );
+    }
+    if (!isObject(parsed)) {
+      continue;
+    }
+    for (const depType of DIRECT_DEP_FIELDS) {
+      const deps = parsed[depType];
+      if (!isObject(deps)) {
+        continue;
+      }
+      for (const [name, spec] of Object.entries(deps)) {
+        if (typeof spec !== "string") {
+          continue;
+        }
+        const entry: DirectDep = { importerKey, depType, spec };
+        const existing = map.get(name);
+        if (existing === undefined) {
+          map.set(name, [entry]);
+        } else {
+          existing.push(entry);
+        }
+      }
+    }
+  }
+  return map;
 }
 
 export function parseWorkspaceOverrides(

@@ -1,11 +1,12 @@
 import {
   categorize,
   classify,
+  hasProtocolPrefix,
   type Result,
   type SkipReason,
 } from "./analyze.ts";
 import { type Lockfile, parseSnapshotKey } from "./lockfile.ts";
-import type { Override } from "./manifest.ts";
+import type { Override, WorkspaceDirectDeps } from "./manifest.ts";
 import type { PackageMetadata } from "./registry.ts";
 import { computeNaturalResolution } from "./resolve.ts";
 
@@ -18,6 +19,8 @@ function skipReasonToValue(reason: SkipReason): string {
   switch (reason) {
     case "nested-key":
       return "(nested key)";
+    case "versioned-key":
+      return "(versioned key)";
     case "protocol-spec":
       return "(protocol spec)";
     case "non-lower-bound":
@@ -28,13 +31,17 @@ function skipReasonToValue(reason: SkipReason): string {
 export function gatherSpecsForTarget(
   target: string,
   lockfile: Lockfile,
+  workspaceDirectDeps: WorkspaceDirectDeps,
   registryData: ReadonlyMap<string, PackageMetadata>,
 ): readonly string[] {
   const specs: string[] = [];
-  const direct = lockfile.directRequirements.get(target);
+  const direct = workspaceDirectDeps.get(target);
   if (direct !== undefined) {
-    for (const req of direct) {
-      specs.push(req.specifier);
+    for (const dep of direct) {
+      if (hasProtocolPrefix(dep.spec)) {
+        continue;
+      }
+      specs.push(dep.spec);
     }
   }
   const parents = lockfile.transitiveParents.get(target);
@@ -65,13 +72,19 @@ export function gatherSpecsForTarget(
 export function evaluateOverride(
   override: Override,
   lockfile: Lockfile,
+  workspaceDirectDeps: WorkspaceDirectDeps,
   registryData: ReadonlyMap<string, PackageMetadata>,
 ): Result {
   const cat = categorize(override.key, override.spec);
   if (cat.kind === "skip") {
     return { status: "skip", value: skipReasonToValue(cat.reason) };
   }
-  const specs = gatherSpecsForTarget(override.key, lockfile, registryData);
+  const specs = gatherSpecsForTarget(
+    override.key,
+    lockfile,
+    workspaceDirectDeps,
+    registryData,
+  );
   if (specs.length === 0) {
     return { status: "prune", value: "(unused)" };
   }

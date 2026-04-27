@@ -1,12 +1,16 @@
-import { maxSatisfying, satisfies } from "semver";
+import { compare, maxSatisfying } from "semver";
 
 /**
- * Given parent dependency specs and a list of candidate published versions,
- * compute the highest version that satisfies all parent specs simultaneously.
+ * For each importer/parent spec, compute the highest published version that
+ * spec would resolve to on its own. Return the lowest of those — i.e. the
+ * worst-case version some consumer would land on if the override were removed.
  *
- * Returns null when there are no parent specs, no candidates, or no version
- * satisfies the intersection. Pre-releases are ignored unless they fall inside
- * a parent spec that explicitly opts them in.
+ * pnpm doesn't always hoist to a single version; when specs disagree, multiple
+ * versions get installed. Reporting the lowest means PRUNE only when *every*
+ * consumer would land at or above the override floor.
+ *
+ * Returns null when there are no parent specs or no candidates. Specs that no
+ * candidate satisfies are skipped (treated as inert constraints).
  */
 export function computeNaturalResolution(
   parentSpecs: readonly string[],
@@ -15,10 +19,17 @@ export function computeNaturalResolution(
   if (parentSpecs.length === 0 || candidateVersions.length === 0) {
     return null;
   }
-  const filtered = candidateVersions.filter((version) =>
-    parentSpecs.every((spec) =>
-      satisfies(version, spec, { includePrerelease: false }),
-    ),
-  );
-  return maxSatisfying(filtered, ">=0.0.0", { includePrerelease: false });
+  let lowest: string | null = null;
+  for (const spec of parentSpecs) {
+    const max = maxSatisfying(candidateVersions, spec, {
+      includePrerelease: false,
+    });
+    if (max === null) {
+      continue;
+    }
+    if (lowest === null || compare(max, lowest) < 0) {
+      lowest = max;
+    }
+  }
+  return lowest;
 }

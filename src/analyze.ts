@@ -40,11 +40,22 @@ export function isNestedKey(key: string): boolean {
   return key.includes(">");
 }
 
+export function isVersionedKey(key: string): boolean {
+  // Detect keys carrying a version constraint, e.g. "ajv@^8.0.0" or
+  // "@scope/pkg@^1.0.0". For "@scope/pkg" the only "@" is the scope marker
+  // at index 0, so we require the separator to appear after position 0.
+  return key.lastIndexOf("@") > 0;
+}
+
 export function hasProtocolPrefix(spec: string): boolean {
   return PROTOCOL_PREFIXES.some((prefix) => spec.startsWith(prefix));
 }
 
-export type SkipReason = "nested-key" | "protocol-spec" | "non-lower-bound";
+export type SkipReason =
+  | "nested-key"
+  | "versioned-key"
+  | "protocol-spec"
+  | "non-lower-bound";
 
 export type Categorization =
   | { readonly kind: "target"; readonly spec: string }
@@ -53,6 +64,9 @@ export type Categorization =
 export function categorize(key: string, spec: string): Categorization {
   if (isNestedKey(key)) {
     return { kind: "skip", reason: "nested-key" };
+  }
+  if (isVersionedKey(key)) {
+    return { kind: "skip", reason: "versioned-key" };
   }
   if (hasProtocolPrefix(spec)) {
     return { kind: "skip", reason: "protocol-spec" };
