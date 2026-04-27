@@ -5,6 +5,7 @@ import {
   hasProtocolPrefix,
   isNestedKey,
   isPureLowerBound,
+  isVersionedKey,
 } from "../src/analyze.ts";
 
 describe("isPureLowerBound", () => {
@@ -62,6 +63,32 @@ describe("isNestedKey", () => {
 
   it("treats scoped flat name as not nested", () => {
     expect(isNestedKey("@scope/foo")).toBe(false);
+  });
+});
+
+describe("isVersionedKey", () => {
+  it("treats plain name as not versioned", () => {
+    expect(isVersionedKey("foo")).toBe(false);
+  });
+
+  it("treats scoped name as not versioned", () => {
+    expect(isVersionedKey("@scope/foo")).toBe(false);
+  });
+
+  it("recognizes name with caret range", () => {
+    expect(isVersionedKey("ajv@^8.0.0")).toBe(true);
+  });
+
+  it("recognizes scoped name with caret range", () => {
+    expect(isVersionedKey("@azure/core-rest-pipeline@^1.0.0")).toBe(true);
+  });
+
+  it("recognizes name with exact pin", () => {
+    expect(isVersionedKey("foo@1.0.0")).toBe(true);
+  });
+
+  it("treats empty string as not versioned", () => {
+    expect(isVersionedKey("")).toBe(false);
   });
 });
 
@@ -132,6 +159,20 @@ describe("categorize", () => {
     });
   });
 
+  it("skips versioned keys", () => {
+    expect(categorize("ajv@^8.0.0", ">=8.18.0")).toEqual({
+      kind: "skip",
+      reason: "versioned-key",
+    });
+  });
+
+  it("skips scoped versioned keys", () => {
+    expect(categorize("@azure/core-rest-pipeline@^1.0.0", ">=1.14.0")).toEqual({
+      kind: "skip",
+      reason: "versioned-key",
+    });
+  });
+
   it("skips protocol specs", () => {
     expect(categorize("foo", "catalog:default")).toEqual({
       kind: "skip",
@@ -160,9 +201,15 @@ describe("categorize", () => {
     });
   });
 
+  it("nested-key takes precedence over versioned-key", () => {
+    // 'foo>bar@1.0.0' has '>' so it's nested first.
+    expect(categorize("foo>bar@1.0.0", ">=1.0.0")).toEqual({
+      kind: "skip",
+      reason: "nested-key",
+    });
+  });
+
   it("protocol takes precedence over non-lower-bound check", () => {
-    // "catalog:default" would also fail isPureLowerBound, but the protocol
-    // reason is more informative.
     expect(categorize("foo", "catalog:default")).toEqual({
       kind: "skip",
       reason: "protocol-spec",

@@ -51,7 +51,12 @@ Once they do, the entry is no longer doing anything — but it's easy to forget 
 
 ## How it works
 
-For each override target, the tool gathers the specs that constrain it — direct importer specs from the lockfile plus parent-package metadata from `https://registry.npmjs.org` — and computes the highest published version satisfying their intersection. If that natural resolution already meets the override's lower bound, the entry is `[PRUNE]`.
+For each override target, the tool gathers the specs that constrain it without the override applied:
+
+- direct importer specs read from each workspace `package.json` (the lockfile's importer specifiers are skipped because pnpm rewrites them to the override value)
+- parent-package metadata fetched from `https://registry.npmjs.org` for transitive parents
+
+For each spec it computes the highest published version that spec would resolve to on its own. The reported version is the **lowest** of those — the worst case some consumer would land on if the override were removed. If that version already meets the override's lower bound, the entry is `[PRUNE]`; otherwise `[KEEP]`.
 
 ## Scope
 
@@ -67,6 +72,7 @@ For each override target, the tool gathers the specs that constrain it — direc
 
 - Skips values using non-semver protocols (`catalog:`, `workspace:`, `file:`, `link:`, `portal:`, `npm:`, `github:`, `git`-prefixed, `http:` / `https:`).
 - Skips nested-key overrides like `"parent>child": "1.2.3"`. Only flat `name &rarr; spec` mappings are evaluated.
+- Skips versioned keys like `"ajv@^8.0.0": ">=8.18.0"`. Such entries combine a selector and a replacement; safely transforming them is not expressible in pnpm syntax, so the verdict is left for human review.
 - Public npm registry only. Private registries and `.npmrc` scoped registry configuration are not consulted.
 - Parents that aren't on the public registry — e.g. workspace-internal packages resolved as transitive parents — are silently dropped from the constraint set. The natural resolution may then appear less constrained than it actually is.
 

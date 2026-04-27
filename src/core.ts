@@ -10,9 +10,11 @@ import {
 } from "./format.ts";
 import { type Lockfile, parseLockfile } from "./lockfile.ts";
 import {
+  buildWorkspaceDirectDeps,
   type Override,
   parsePackageJsonOverrides,
   parseWorkspaceOverrides,
+  type WorkspaceDirectDeps,
   type WorkspaceFilename,
 } from "./manifest.ts";
 import {
@@ -59,6 +61,23 @@ async function findFirstExisting(
     }
   }
   return null;
+}
+
+async function readWorkspaceDirectDeps(
+  lockfileDir: string,
+  importerPaths: readonly string[],
+): Promise<WorkspaceDirectDeps> {
+  const importerContents = new Map<string, string>();
+  await Promise.all(
+    importerPaths.map(async (importerKey) => {
+      const path = join(lockfileDir, importerKey, "package.json");
+      const content = await readFileIfExists(path);
+      if (content !== null) {
+        importerContents.set(importerKey, content);
+      }
+    }),
+  );
+  return buildWorkspaceDirectDeps(importerContents);
 }
 
 function workspaceFilenameFromPath(path: string): WorkspaceFilename {
@@ -138,6 +157,7 @@ export async function runAudit(
   }
   let allOverrides: readonly Override[];
   let lockfile: Lockfile;
+  let workspaceDirectDeps: WorkspaceDirectDeps;
   try {
     const fromPackage = parsePackageJsonOverrides(packageJsonContent);
     const fromWorkspace =
@@ -149,6 +169,10 @@ export async function runAudit(
           );
     allOverrides = [...fromPackage, ...fromWorkspace];
     lockfile = parseLockfile(lockResult.content);
+    workspaceDirectDeps = await readWorkspaceDirectDeps(
+      dir,
+      lockfile.importerPaths,
+    );
   } catch (e) {
     emitError(e instanceof Error ? e.message : "parse error");
     return 2;
@@ -194,7 +218,12 @@ export async function runAudit(
           dataMap.set(name, meta);
         }
       }
-      const result = evaluateOverride(override, lockfile, dataMap);
+      const result = evaluateOverride(
+        override,
+        lockfile,
+        workspaceDirectDeps,
+        dataMap,
+      );
       const entry: AuditEntry = { override, result };
       collectedEntries.push(entry);
       if (result.status === "prune") {

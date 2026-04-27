@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { Lockfile } from "../src/lockfile.ts";
-import type { Override } from "../src/manifest.ts";
+import type {
+  DirectDep,
+  Override,
+  WorkspaceDirectDeps,
+} from "../src/manifest.ts";
 import {
   collectNeededRegistryPackages,
   collectPackagesForOverride,
@@ -10,28 +14,8 @@ import {
 import type { PackageMetadata } from "../src/registry.ts";
 
 function makeLockfile(args: {
-  direct?: Record<string, { specifier: string; version: string }>;
   transitive?: Record<string, Array<{ parent: string; resolved: string }>>;
 }): Lockfile {
-  const directMap = new Map<
-    string,
-    {
-      importerKey: string;
-      depType: "dependencies";
-      specifier: string;
-      resolvedVersion: string;
-    }[]
-  >();
-  for (const [name, dep] of Object.entries(args.direct ?? {})) {
-    directMap.set(name, [
-      {
-        importerKey: ".",
-        depType: "dependencies",
-        specifier: dep.specifier,
-        resolvedVersion: dep.version,
-      },
-    ]);
-  }
   const transMap = new Map<
     string,
     { parentKey: string; resolvedVersion: string }[]
@@ -47,10 +31,22 @@ function makeLockfile(args: {
   }
   return {
     version: "9.0",
-    directRequirements: directMap,
+    importerPaths: ["."],
     transitiveParents: transMap,
   };
 }
+
+function makeWorkspaceDirectDeps(
+  args: Record<string, string>,
+): WorkspaceDirectDeps {
+  const map = new Map<string, DirectDep[]>();
+  for (const [name, spec] of Object.entries(args)) {
+    map.set(name, [{ importerKey: ".", depType: "dependencies", spec }]);
+  }
+  return map;
+}
+
+const NO_DIRECT: WorkspaceDirectDeps = new Map();
 
 function makeMetadata(
   name: string,
@@ -76,13 +72,20 @@ const PKG_OVERRIDE = (key: string, spec: string): Override => ({
 });
 
 describe("gatherSpecsForTarget", () => {
-  it("collects specifiers from direct requirements", () => {
-    const lockfile = makeLockfile({
-      direct: { foo: { specifier: "^1.0.0", version: "1.5.0" } },
-    });
-    expect(gatherSpecsForTarget("foo", lockfile, new Map())).toEqual([
+  it("collects specs from workspace direct deps", () => {
+    const lockfile = makeLockfile({});
+    const direct = makeWorkspaceDirectDeps({ foo: "^1.0.0" });
+    expect(gatherSpecsForTarget("foo", lockfile, direct, new Map())).toEqual([
       "^1.0.0",
     ]);
+  });
+
+  it("skips workspace direct deps with protocol-prefixed specs", () => {
+    const lockfile = makeLockfile({});
+    const direct = makeWorkspaceDirectDeps({ foo: "workspace:*" });
+    expect(gatherSpecsForTarget("foo", lockfile, direct, new Map())).toEqual(
+      [],
+    );
   });
 
   it("collects specs from transitive parents via registry data", () => {
@@ -98,23 +101,22 @@ describe("gatherSpecsForTarget", () => {
       ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.0.0" } })],
       ["parentB", makeMetadata("parentB", { "2.0.0": { target: "<2.0.0" } })],
     ]);
-    expect(gatherSpecsForTarget("target", lockfile, registry)).toEqual([
-      ">=1.0.0",
-      "<2.0.0",
-    ]);
+    expect(
+      gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
+    ).toEqual([">=1.0.0", "<2.0.0"]);
   });
 
   it("combines direct and transitive specs", () => {
     const lockfile = makeLockfile({
-      direct: { target: { specifier: "^1.0.0", version: "1.5.0" } },
       transitive: {
         target: [{ parent: "parentA@1.0.0", resolved: "1.5.0" }],
       },
     });
+    const direct = makeWorkspaceDirectDeps({ target: "^1.0.0" });
     const registry = new Map<string, PackageMetadata>([
       ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.2.0" } })],
     ]);
-    expect(gatherSpecsForTarget("target", lockfile, registry)).toEqual([
+    expect(gatherSpecsForTarget("target", lockfile, direct, registry)).toEqual([
       "^1.0.0",
       ">=1.2.0",
     ]);
@@ -126,7 +128,9 @@ describe("gatherSpecsForTarget", () => {
         target: [{ parent: "no-at-sign", resolved: "1.0.0" }],
       },
     });
-    expect(gatherSpecsForTarget("target", lockfile, new Map())).toEqual([]);
+    expect(
+      gatherSpecsForTarget("target", lockfile, NO_DIRECT, new Map()),
+    ).toEqual([]);
   });
 
   it("skips parents whose registry metadata is missing", () => {
@@ -135,7 +139,9 @@ describe("gatherSpecsForTarget", () => {
         target: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
       },
     });
-    expect(gatherSpecsForTarget("target", lockfile, new Map())).toEqual([]);
+    expect(
+      gatherSpecsForTarget("target", lockfile, NO_DIRECT, new Map()),
+    ).toEqual([]);
   });
 
   it("skips parents whose version meta is missing", () => {
@@ -147,7 +153,9 @@ describe("gatherSpecsForTarget", () => {
     const registry = new Map<string, PackageMetadata>([
       ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.0.0" } })],
     ]);
-    expect(gatherSpecsForTarget("target", lockfile, registry)).toEqual([]);
+    expect(
+      gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
+    ).toEqual([]);
   });
 
   it("skips parents that don't list the target in their dependencies", () => {
@@ -159,12 +167,14 @@ describe("gatherSpecsForTarget", () => {
     const registry = new Map<string, PackageMetadata>([
       ["parentA", makeMetadata("parentA", { "1.0.0": { other: ">=1.0.0" } })],
     ]);
-    expect(gatherSpecsForTarget("target", lockfile, registry)).toEqual([]);
+    expect(
+      gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
+    ).toEqual([]);
   });
 
   it("returns empty array when target is not present anywhere", () => {
     expect(
-      gatherSpecsForTarget("missing", makeLockfile({}), new Map()),
+      gatherSpecsForTarget("missing", makeLockfile({}), NO_DIRECT, new Map()),
     ).toEqual([]);
   });
 });
@@ -174,6 +184,7 @@ describe("evaluateOverride", () => {
     const result = evaluateOverride(
       PKG_OVERRIDE("foo>bar", ">=1.0.0"),
       makeLockfile({}),
+      NO_DIRECT,
       new Map(),
     );
     expect(result).toEqual({ status: "skip", value: "(nested key)" });
@@ -183,6 +194,7 @@ describe("evaluateOverride", () => {
     const result = evaluateOverride(
       PKG_OVERRIDE("foo", "catalog:default"),
       makeLockfile({}),
+      NO_DIRECT,
       new Map(),
     );
     expect(result).toEqual({ status: "skip", value: "(protocol spec)" });
@@ -192,6 +204,7 @@ describe("evaluateOverride", () => {
     const result = evaluateOverride(
       PKG_OVERRIDE("foo", "^1.0.0"),
       makeLockfile({}),
+      NO_DIRECT,
       new Map(),
     );
     expect(result).toEqual({ status: "skip", value: "(non-lower-bound)" });
@@ -201,6 +214,7 @@ describe("evaluateOverride", () => {
     const result = evaluateOverride(
       PKG_OVERRIDE("foo", ">=1.0.0"),
       makeLockfile({}),
+      NO_DIRECT,
       new Map(),
     );
     expect(result).toEqual({ status: "prune", value: "(unused)" });
@@ -218,6 +232,7 @@ describe("evaluateOverride", () => {
     const result = evaluateOverride(
       PKG_OVERRIDE("foo", ">=1.0.0"),
       lockfile,
+      NO_DIRECT,
       registry,
     );
     expect(result).toEqual({ status: "error", value: "(registry miss)" });
@@ -243,6 +258,7 @@ describe("evaluateOverride", () => {
     const result = evaluateOverride(
       PKG_OVERRIDE("foo", ">=2.0.0"),
       lockfile,
+      NO_DIRECT,
       registry,
     );
     expect(result).toEqual({ status: "prune", value: "2.5.0" });
@@ -268,9 +284,103 @@ describe("evaluateOverride", () => {
     const result = evaluateOverride(
       PKG_OVERRIDE("foo", ">=2.0.0"),
       lockfile,
+      NO_DIRECT,
       registry,
     );
     expect(result).toEqual({ status: "keep", value: "1.5.0" });
+  });
+
+  it("uses workspace direct dep spec to evaluate the override floor", () => {
+    const lockfile = makeLockfile({});
+    const direct = makeWorkspaceDirectDeps({ foo: "^2.0.0" });
+    const registry = new Map<string, PackageMetadata>([
+      [
+        "foo",
+        makeMetadata("foo", {
+          "1.0.0": {},
+          "2.0.0": {},
+          "2.5.0": {},
+        }),
+      ],
+    ]);
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=2.0.0"),
+      lockfile,
+      direct,
+      registry,
+    );
+    expect(result).toEqual({ status: "prune", value: "2.5.0" });
+  });
+
+  it("keeps when workspace direct dep spec resolves below the override floor", () => {
+    const lockfile = makeLockfile({});
+    const direct = makeWorkspaceDirectDeps({ foo: "1.0.0" });
+    const registry = new Map<string, PackageMetadata>([
+      [
+        "foo",
+        makeMetadata("foo", {
+          "1.0.0": {},
+          "1.5.0": {},
+          "2.0.0": {},
+        }),
+      ],
+    ]);
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=2.0.0"),
+      lockfile,
+      direct,
+      registry,
+    );
+    expect(result).toEqual({ status: "keep", value: "1.0.0" });
+  });
+
+  it("treats target as unused when only direct dep spec is protocol-prefixed", () => {
+    const lockfile = makeLockfile({});
+    const direct = makeWorkspaceDirectDeps({ foo: "workspace:*" });
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=1.0.0"),
+      lockfile,
+      direct,
+      new Map(),
+    );
+    expect(result).toEqual({ status: "prune", value: "(unused)" });
+  });
+
+  it("skips versioned keys", () => {
+    const result = evaluateOverride(
+      PKG_OVERRIDE("ajv@^8.0.0", ">=8.18.0"),
+      makeLockfile({}),
+      NO_DIRECT,
+      new Map(),
+    );
+    expect(result).toEqual({ status: "skip", value: "(versioned key)" });
+  });
+
+  it("keeps when conflicting specs would force a per-importer downgrade", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "parentA@1.0.0", resolved: "1.5.0" }],
+      },
+    });
+    const direct = makeWorkspaceDirectDeps({ foo: "1.0.0" });
+    const registry = new Map<string, PackageMetadata>([
+      ["parentA", makeMetadata("parentA", { "1.0.0": { foo: "^1.5.0" } })],
+      [
+        "foo",
+        makeMetadata("foo", {
+          "1.0.0": {},
+          "1.5.0": {},
+          "2.0.0": {},
+        }),
+      ],
+    ]);
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=2.0.0"),
+      lockfile,
+      direct,
+      registry,
+    );
+    expect(result).toEqual({ status: "keep", value: "1.0.0" });
   });
 });
 

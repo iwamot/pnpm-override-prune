@@ -2,15 +2,6 @@ import { parse as parseYaml } from "yaml";
 
 export const SUPPORTED_LOCKFILE_VERSION = "9.0";
 
-const DIRECT_DEP_FIELDS = [
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-  "optionalDependencies",
-] as const;
-
-export type DirectDepType = (typeof DIRECT_DEP_FIELDS)[number];
-
 export class UnsupportedLockfileVersionError extends Error {
   override readonly name = "UnsupportedLockfileVersionError";
   readonly found: string | null;
@@ -31,13 +22,6 @@ export class MalformedLockfileError extends Error {
   }
 }
 
-export interface DirectRequirement {
-  readonly importerKey: string;
-  readonly depType: DirectDepType;
-  readonly specifier: string;
-  readonly resolvedVersion: string;
-}
-
 export interface ParentRequirement {
   readonly parentKey: string;
   readonly resolvedVersion: string;
@@ -45,10 +29,7 @@ export interface ParentRequirement {
 
 export interface Lockfile {
   readonly version: string;
-  readonly directRequirements: ReadonlyMap<
-    string,
-    readonly DirectRequirement[]
-  >;
+  readonly importerPaths: readonly string[];
   readonly transitiveParents: ReadonlyMap<string, readonly ParentRequirement[]>;
 }
 
@@ -94,42 +75,12 @@ function appendToMultiMap<K, V>(map: Map<K, V[]>, key: K, value: V): void {
   }
 }
 
-function extractDirectRequirements(
-  raw: Record<string, unknown>,
-): ReadonlyMap<string, readonly DirectRequirement[]> {
-  const map = new Map<string, DirectRequirement[]>();
+function extractImporterPaths(raw: Record<string, unknown>): readonly string[] {
   const importers = raw.importers;
   if (!isObject(importers)) {
-    return map;
+    return [];
   }
-  for (const [importerKey, importerValue] of Object.entries(importers)) {
-    if (!isObject(importerValue)) {
-      continue;
-    }
-    for (const depType of DIRECT_DEP_FIELDS) {
-      const deps = importerValue[depType];
-      if (!isObject(deps)) {
-        continue;
-      }
-      for (const [pkgName, depValue] of Object.entries(deps)) {
-        if (!isObject(depValue)) {
-          continue;
-        }
-        const specifier = depValue.specifier;
-        const version = depValue.version;
-        if (typeof specifier !== "string" || typeof version !== "string") {
-          continue;
-        }
-        appendToMultiMap(map, pkgName, {
-          importerKey,
-          depType,
-          specifier,
-          resolvedVersion: parseResolvedVersion(version),
-        });
-      }
-    }
-  }
-  return map;
+  return Object.keys(importers);
 }
 
 function extractTransitiveParents(
@@ -182,7 +133,7 @@ export function parseLockfile(content: string): Lockfile {
   }
   return {
     version,
-    directRequirements: extractDirectRequirements(parsed),
+    importerPaths: extractImporterPaths(parsed),
     transitiveParents: extractTransitiveParents(parsed),
   };
 }

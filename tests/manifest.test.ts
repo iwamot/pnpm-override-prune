@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  buildWorkspaceDirectDeps,
   MalformedManifestError,
   parsePackageJsonOverrides,
   parseWorkspaceOverrides,
@@ -189,6 +190,65 @@ describe("parseWorkspaceOverrides", () => {
   it("throws MalformedManifestError on invalid YAML", () => {
     expect(() =>
       parseWorkspaceOverrides(": : :\n  bad:\n indent", "pnpm-workspace.yaml"),
+    ).toThrow(MalformedManifestError);
+  });
+});
+
+describe("buildWorkspaceDirectDeps", () => {
+  it("collects direct deps across all importer fields, indexed by name", () => {
+    const root = JSON.stringify({
+      dependencies: { foo: "^1.0.0" },
+      devDependencies: { bar: "2.0.0" },
+      peerDependencies: { baz: ">=3.0.0" },
+      optionalDependencies: { qux: "^4.0.0" },
+    });
+    const result = buildWorkspaceDirectDeps(new Map([[".", root]]));
+    expect(result.get("foo")).toEqual([
+      { importerKey: ".", depType: "dependencies", spec: "^1.0.0" },
+    ]);
+    expect(result.get("bar")).toEqual([
+      { importerKey: ".", depType: "devDependencies", spec: "2.0.0" },
+    ]);
+    expect(result.get("baz")).toEqual([
+      { importerKey: ".", depType: "peerDependencies", spec: ">=3.0.0" },
+    ]);
+    expect(result.get("qux")).toEqual([
+      { importerKey: ".", depType: "optionalDependencies", spec: "^4.0.0" },
+    ]);
+  });
+
+  it("merges entries from multiple importers under the same target name", () => {
+    const a = JSON.stringify({ dependencies: { foo: "1.0.0" } });
+    const b = JSON.stringify({ devDependencies: { foo: "2.0.0" } });
+    const result = buildWorkspaceDirectDeps(
+      new Map([
+        ["packages/a", a],
+        ["packages/b", b],
+      ]),
+    );
+    expect(result.get("foo")).toEqual([
+      { importerKey: "packages/a", depType: "dependencies", spec: "1.0.0" },
+      { importerKey: "packages/b", depType: "devDependencies", spec: "2.0.0" },
+    ]);
+  });
+
+  it("ignores non-string spec values", () => {
+    const content = JSON.stringify({
+      dependencies: { good: "1.0.0", bad: 42 },
+    });
+    const result = buildWorkspaceDirectDeps(new Map([[".", content]]));
+    expect(result.get("good")).toBeDefined();
+    expect(result.get("bad")).toBeUndefined();
+  });
+
+  it("ignores importers whose root is not an object", () => {
+    const result = buildWorkspaceDirectDeps(new Map([[".", "[]"]]));
+    expect(result.size).toBe(0);
+  });
+
+  it("throws MalformedManifestError on invalid JSON", () => {
+    expect(() =>
+      buildWorkspaceDirectDeps(new Map([[".", "{not json"]])),
     ).toThrow(MalformedManifestError);
   });
 });

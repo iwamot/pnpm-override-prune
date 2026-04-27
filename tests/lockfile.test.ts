@@ -113,26 +113,28 @@ describe("parseLockfile", () => {
     expect(lf.version).toBe("9.0");
   });
 
-  it("collects direct requirements with specifier and resolved version", () => {
+  it("collects importer paths from the importers section", () => {
     const lf = parseLockfile(VALID_LOCKFILE);
-    const semver = lf.directRequirements.get("semver");
-    expect(semver).toEqual([
-      {
-        importerKey: ".",
-        depType: "dependencies",
-        specifier: "^7.0.0",
-        resolvedVersion: "7.7.4",
-      },
-    ]);
-    const ts = lf.directRequirements.get("typescript");
-    expect(ts).toEqual([
-      {
-        importerKey: ".",
-        depType: "devDependencies",
-        specifier: "6.0.3",
-        resolvedVersion: "6.0.3",
-      },
-    ]);
+    expect(lf.importerPaths).toEqual(["."]);
+  });
+
+  it("collects every importer key (including empty importers)", () => {
+    const content = `lockfileVersion: '9.0'
+
+importers:
+
+  .: {}
+
+  packages/a:
+    dependencies:
+      foo:
+        specifier: ^1.0.0
+        version: 1.0.0
+
+  packages/b: {}
+`;
+    const lf = parseLockfile(content);
+    expect(lf.importerPaths).toEqual([".", "packages/a", "packages/b"]);
   });
 
   it("collects transitive parents from snapshots dependencies", () => {
@@ -149,29 +151,6 @@ describe("parseLockfile", () => {
     const parents = lf.transitiveParents.get("optionaldep");
     expect(parents).toEqual([
       { parentKey: "speech-rule-engine@4.1.4", resolvedVersion: "1.2.3" },
-    ]);
-  });
-
-  it("strips peer decorations from importer resolved version", () => {
-    const lockfile = `lockfileVersion: '9.0'
-
-importers:
-  .:
-    dependencies:
-      foo:
-        specifier: 1.0.0
-        version: 1.0.0(peer@2.0.0)
-
-snapshots: {}
-`;
-    const lf = parseLockfile(lockfile);
-    expect(lf.directRequirements.get("foo")).toEqual([
-      {
-        importerKey: ".",
-        depType: "dependencies",
-        specifier: "1.0.0",
-        resolvedVersion: "1.0.0",
-      },
     ]);
   });
 
@@ -227,56 +206,10 @@ snapshots: {}
     expect(() => parseLockfile("- a\n- b\n")).toThrow(MalformedLockfileError);
   });
 
-  it("returns empty maps when importers and snapshots are absent", () => {
+  it("returns empty transitive parents when snapshots are absent", () => {
     const lf = parseLockfile("lockfileVersion: '9.0'\n");
-    expect(lf.directRequirements.size).toBe(0);
     expect(lf.transitiveParents.size).toBe(0);
-  });
-
-  it("ignores importers entries that are not mappings", () => {
-    const lockfile = `lockfileVersion: '9.0'
-importers:
-  .: invalid-string-instead-of-map
-`;
-    const lf = parseLockfile(lockfile);
-    expect(lf.directRequirements.size).toBe(0);
-  });
-
-  it("ignores dep-type fields whose value is not a mapping", () => {
-    const lockfile = `lockfileVersion: '9.0'
-importers:
-  .:
-    dependencies: not-a-map
-`;
-    const lf = parseLockfile(lockfile);
-    expect(lf.directRequirements.size).toBe(0);
-  });
-
-  it("ignores dep entries that are not mappings", () => {
-    const lockfile = `lockfileVersion: '9.0'
-importers:
-  .:
-    dependencies:
-      foo: just-a-string
-`;
-    const lf = parseLockfile(lockfile);
-    expect(lf.directRequirements.size).toBe(0);
-  });
-
-  it("ignores dep entries with non-string specifier or version", () => {
-    const lockfile = `lockfileVersion: '9.0'
-importers:
-  .:
-    dependencies:
-      foo:
-        specifier: 1.0.0
-        version: 1
-      bar:
-        specifier: 2
-        version: 2.0.0
-`;
-    const lf = parseLockfile(lockfile);
-    expect(lf.directRequirements.size).toBe(0);
+    expect(lf.importerPaths).toEqual([]);
   });
 
   it("ignores snapshot entries that are not mappings", () => {
