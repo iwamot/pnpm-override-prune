@@ -1,0 +1,14 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: iwamot/workflows/.github/workflows/validate.yml@d718704d344724f106df3152191d71859c0f3715 # v1.3.0

@@ -1,0 +1,11 @@
+min_version = "2026.4.8"
+
+[settings]
+install_before = "1d"
+
+[tools]
+
+[task_config]
+includes = [
+  "git::https://github.com/iwamot/mise-tasks.git//.mise/tasks?ref=v1.1.0",
+]
