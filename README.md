@@ -41,57 +41,34 @@ Exit codes:
 
 ## Why
 
-pnpm and aube let you pin a transitive dependency version via override
-entries — in `package.json` (`pnpm.overrides` or top-level `overrides`)
-or in `pnpm-workspace.yaml` / `aube-workspace.yaml` (top-level
-`overrides:`). A common reason to reach for these is CVE
-mitigation: a vulnerability is disclosed in a transitive package, and you
-force the patched minimum version while waiting for direct deps to require
-it naturally. Once they catch up, the entry is no longer doing anything —
-but it's easy to forget which ones are still load-bearing, and stale
-overrides become a judgment cost at every audit or upgrade ("is this still
-needed, or just history?"). `pnpm-override-prune` answers that mechanically
-by checking whether each entry's lower bound is already satisfied by the
-natural resolution that the npm registry would yield without the override.
+pnpm and aube let you pin a transitive dependency version via override entries — in `package.json` (`pnpm.overrides` or top-level `overrides`) or in `pnpm-workspace.yaml` / `aube-workspace.yaml` (top-level `overrides:`).
+
+A common reason to reach for these is CVE mitigation: a vulnerability is disclosed in a transitive package, and you force the patched minimum version while direct deps catch up.
+
+Once they do, the entry is no longer doing anything — but it's easy to forget which ones are still load-bearing. Stale overrides become a judgment cost at every audit or upgrade ("is this still needed, or just history?").
+
+`pnpm-override-prune` answers that mechanically: it checks whether each entry's lower bound is already satisfied by what the npm registry would resolve without the override.
+
+## How it works
+
+For each override target, the tool gathers the specs that constrain it — direct importer specs from the lockfile plus parent-package metadata from `https://registry.npmjs.org` — and computes the highest published version satisfying their intersection. If that natural resolution already meets the override's lower bound, the entry is `[PRUNE]`.
 
 ## Scope
 
-- Reads override entries from these locations:
+- Reads override entries from:
   - `package.json` &rarr; `pnpm.overrides`
-  - `package.json` &rarr; top-level `overrides` (npm-compatible form, also
-    used by `aube audit --fix`)
+  - `package.json` &rarr; top-level `overrides` (npm-compatible form, also used by `aube audit --fix`)
   - `pnpm-workspace.yaml` or `aube-workspace.yaml` &rarr; top-level `overrides:`
-- When the same key appears in both `pnpm.overrides` and top-level
-  `overrides`, both entries are evaluated and reported independently
-  (pnpm gives `pnpm.overrides` precedence at install time, but the tool
-  surfaces both so dead duplicates can be cleaned up).
-- Only entries whose specifier uses `>=` and/or `>` are checked. Entries
-  using exact pins (`1.2.3`), caret (`^1.2.3`), tilde (`~1.2.3`), or
-  bounded ranges are skipped — removing an upper bound the user wrote
-  intentionally is unsafe.
-- Lockfile must be `pnpm-lock.yaml` or `aube-lock.yaml` at
-  `lockfileVersion: '9.0'` (pnpm 9+ / aube). Older formats are not
-  supported in this release.
-- Detection method: the tool gathers the parent specs that constrain each
-  override target — direct importer specs from the lockfile plus
-  parent-package metadata from `https://registry.npmjs.org` — and computes
-  the highest published version satisfying their intersection. If that
-  natural resolution already meets the override's lower bound, the entry
-  is `[PRUNE]`.
+- When a key appears in both `pnpm.overrides` and top-level `overrides`, both are reported independently. pnpm gives `pnpm.overrides` precedence at install time, but stale duplicates in the other location are easy to overlook.
+- Only specifiers using `>=` and/or `>` are checked. Exact pins (`1.2.3`), caret (`^1.2.3`), tilde (`~1.2.3`), and bounded ranges are skipped — removing an intentional upper bound is unsafe.
+- Lockfile must be `pnpm-lock.yaml` or `aube-lock.yaml` at `lockfileVersion: '9.0'` (pnpm 9+ / aube). Older formats are not supported in this release.
 
 ## Known limitations
 
-- Skips entries whose value is a non-semver protocol (`catalog:`,
-  `workspace:`, `file:`, `link:`, `portal:`, `npm:`, `github:`, `git`-prefixed,
-  `http:` / `https:`).
-- Skips nested-key overrides like `"parent>child": "1.2.3"`. Only flat
-  `name &rarr; spec` mappings are evaluated.
-- Public npm registry only. Private registries / scoped registry
-  configuration in `.npmrc` are not consulted.
-- Parents that aren't on the public registry (workspace-internal packages
-  resolved as transitive parents) are silently dropped from the constraint
-  set, which can make the natural resolution appear less constrained than
-  it really is.
+- Skips values using non-semver protocols (`catalog:`, `workspace:`, `file:`, `link:`, `portal:`, `npm:`, `github:`, `git`-prefixed, `http:` / `https:`).
+- Skips nested-key overrides like `"parent>child": "1.2.3"`. Only flat `name &rarr; spec` mappings are evaluated.
+- Public npm registry only. Private registries and `.npmrc` scoped registry configuration are not consulted.
+- Parents that aren't on the public registry — e.g. workspace-internal packages resolved as transitive parents — are silently dropped from the constraint set. The natural resolution may then appear less constrained than it actually is.
 
 ## License
 
