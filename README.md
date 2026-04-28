@@ -66,13 +66,15 @@ For each spec it computes the highest published version that spec would resolve 
   - `pnpm-workspace.yaml` or `aube-workspace.yaml` &rarr; top-level `overrides:`
 - When a key appears in both `pnpm.overrides` and top-level `overrides`, both are reported independently. pnpm gives `pnpm.overrides` precedence at install time, but stale duplicates in the other location are easy to overlook.
 - Only specifiers using `>=` and/or `>` are checked. Exact pins (`1.2.3`), caret (`^1.2.3`), tilde (`~1.2.3`), and bounded ranges are skipped — removing an intentional upper bound is unsafe.
+- Versioned keys like `"glob-parent@<5.1.2": ">=5.1.2"` (the form `pnpm audit --fix` typically emits) are evaluated. The selector is matched against each parent's requested spec via [`semver.intersects`](https://github.com/npm/node-semver#ranges-1) — the rule pnpm itself uses since [pnpm/pnpm#6904](https://github.com/pnpm/pnpm/pull/6904).
 - Lockfile must be `pnpm-lock.yaml` or `aube-lock.yaml` at `lockfileVersion: '9.0'` (pnpm 9+ / aube). Older formats are not supported in this release.
 
 ## Known limitations
 
 - Skips values using non-semver protocols (`catalog:`, `workspace:`, `file:`, `link:`, `portal:`, `npm:`, `github:`, `git`-prefixed, `http:` / `https:`).
 - Skips nested-key overrides like `"parent>child": "1.2.3"`. Only flat `name &rarr; spec` mappings are evaluated.
-- Skips versioned keys like `"ajv@^8.0.0": ">=8.18.0"`. Such entries combine a selector and a replacement; safely transforming them is not expressible in pnpm syntax, so the verdict is left for human review.
+- Skips versioned keys whose selector isn't a parseable semver range (e.g., `"foo@latest": ">=1.0.0"`). pnpm itself falls back to literal-string matching for such selectors, so they're rarely effective; verdict is left for human review.
+- Each override entry is evaluated independently. When multiple entries target the same package (e.g., several `lodash@...` rows from cumulative `pnpm audit --fix` runs), the tool won't propose consolidating them into a single stronger entry — it only marks each one prunable when its own selector/spec combination is a no-op against the natural resolution.
 - Public npm registry only. Private registries and `.npmrc` scoped registry configuration are not consulted.
 - Parents that aren't on the public registry — e.g. workspace-internal packages resolved as transitive parents — are silently dropped from the constraint set. The natural resolution may then appear less constrained than it actually is.
 
