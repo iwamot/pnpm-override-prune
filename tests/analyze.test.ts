@@ -1,11 +1,12 @@
 import { describe, expect, it } from "bun:test";
+import { Range } from "semver";
 import {
   categorize,
   classify,
   hasProtocolPrefix,
   isNestedKey,
   isPureLowerBound,
-  isVersionedKey,
+  parseKey,
 } from "../src/analyze.ts";
 
 describe("isPureLowerBound", () => {
@@ -57,6 +58,10 @@ describe("isNestedKey", () => {
     expect(isNestedKey("foo>bar")).toBe(true);
   });
 
+  it("recognizes parent@version>child syntax", () => {
+    expect(isNestedKey("qar@1>zoo")).toBe(true);
+  });
+
   it("treats flat name as not nested", () => {
     expect(isNestedKey("foo")).toBe(false);
   });
@@ -64,31 +69,70 @@ describe("isNestedKey", () => {
   it("treats scoped flat name as not nested", () => {
     expect(isNestedKey("@scope/foo")).toBe(false);
   });
+
+  it("treats empty string as not nested", () => {
+    expect(isNestedKey("")).toBe(false);
+  });
+
+  it("does not confuse '>=' comparator inside selector", () => {
+    expect(isNestedKey("lodash@>=4.0.0 <=4.17.22")).toBe(false);
+  });
+
+  it("does not confuse '>X' bare comparator", () => {
+    expect(isNestedKey("lodash@>4.0.0")).toBe(false);
+  });
+
+  it("does not confuse '> X' (space-separated comparator)", () => {
+    expect(isNestedKey("lodash@> 4.0.0")).toBe(false);
+  });
+
+  it("treats trailing '>' as nested (malformed)", () => {
+    expect(isNestedKey("foo>")).toBe(true);
+  });
 });
 
-describe("isVersionedKey", () => {
-  it("treats plain name as not versioned", () => {
-    expect(isVersionedKey("foo")).toBe(false);
+describe("parseKey", () => {
+  it("returns null selector for plain name", () => {
+    expect(parseKey("foo")).toEqual({ name: "foo", selectorRaw: null });
   });
 
-  it("treats scoped name as not versioned", () => {
-    expect(isVersionedKey("@scope/foo")).toBe(false);
+  it("returns null selector for scoped name", () => {
+    expect(parseKey("@scope/foo")).toEqual({
+      name: "@scope/foo",
+      selectorRaw: null,
+    });
   });
 
-  it("recognizes name with caret range", () => {
-    expect(isVersionedKey("ajv@^8.0.0")).toBe(true);
+  it("splits name and selector for caret range", () => {
+    expect(parseKey("ajv@^8.0.0")).toEqual({
+      name: "ajv",
+      selectorRaw: "^8.0.0",
+    });
   });
 
-  it("recognizes scoped name with caret range", () => {
-    expect(isVersionedKey("@azure/core-rest-pipeline@^1.0.0")).toBe(true);
+  it("splits name and selector for scoped + caret range", () => {
+    expect(parseKey("@azure/core-rest-pipeline@^1.0.0")).toEqual({
+      name: "@azure/core-rest-pipeline",
+      selectorRaw: "^1.0.0",
+    });
   });
 
-  it("recognizes name with exact pin", () => {
-    expect(isVersionedKey("foo@1.0.0")).toBe(true);
+  it("splits name and selector for compound range", () => {
+    expect(parseKey("lodash@>=4.0.0 <=4.17.22")).toEqual({
+      name: "lodash",
+      selectorRaw: ">=4.0.0 <=4.17.22",
+    });
   });
 
-  it("treats empty string as not versioned", () => {
-    expect(isVersionedKey("")).toBe(false);
+  it("splits name and selector for exact pin", () => {
+    expect(parseKey("foo@1.0.0")).toEqual({
+      name: "foo",
+      selectorRaw: "1.0.0",
+    });
+  });
+
+  it("treats empty string as plain", () => {
+    expect(parseKey("")).toEqual({ name: "", selectorRaw: null });
   });
 });
 
@@ -145,11 +189,41 @@ describe("hasProtocolPrefix", () => {
 });
 
 describe("categorize", () => {
-  it("targets a pure lower bound on a flat key", () => {
+  it("targets a pure lower bound on a flat key with no selector", () => {
     expect(categorize("foo", ">=1.0.0")).toEqual({
       kind: "target",
+      name: "foo",
+      selector: null,
       spec: ">=1.0.0",
     });
+  });
+
+  it("targets a versioned key with parseable selector", () => {
+    const result = categorize("lodash@<4.17.21", ">=4.17.21");
+    expect(result.kind).toBe("target");
+    if (result.kind === "target") {
+      expect(result.name).toBe("lodash");
+      expect(result.spec).toBe(">=4.17.21");
+      expect(result.selector?.range).toBe(new Range("<4.17.21").range);
+    }
+  });
+
+  it("targets a scoped versioned key", () => {
+    const result = categorize("@azure/core-rest-pipeline@^1.0.0", ">=1.14.0");
+    expect(result.kind).toBe("target");
+    if (result.kind === "target") {
+      expect(result.name).toBe("@azure/core-rest-pipeline");
+      expect(result.selector?.range).toBe(new Range("^1.0.0").range);
+    }
+  });
+
+  it("targets a versioned key with compound selector", () => {
+    const result = categorize("lodash@>=4.0.0 <=4.17.22", ">=4.17.23");
+    expect(result.kind).toBe("target");
+    if (result.kind === "target") {
+      expect(result.name).toBe("lodash");
+      expect(result.selector?.range).toBe(new Range(">=4.0.0 <=4.17.22").range);
+    }
   });
 
   it("skips nested keys", () => {
@@ -159,17 +233,17 @@ describe("categorize", () => {
     });
   });
 
-  it("skips versioned keys", () => {
-    expect(categorize("ajv@^8.0.0", ">=8.18.0")).toEqual({
+  it("skips when selector is a dist-tag", () => {
+    expect(categorize("foo@latest", ">=1.0.0")).toEqual({
       kind: "skip",
-      reason: "versioned-key",
+      reason: "unsupported-selector",
     });
   });
 
-  it("skips scoped versioned keys", () => {
-    expect(categorize("@azure/core-rest-pipeline@^1.0.0", ">=1.14.0")).toEqual({
+  it("skips when selector is non-semver garbage", () => {
+    expect(categorize("foo@my-fork", ">=1.0.0")).toEqual({
       kind: "skip",
-      reason: "versioned-key",
+      reason: "unsupported-selector",
     });
   });
 
@@ -194,6 +268,13 @@ describe("categorize", () => {
     });
   });
 
+  it("skips versioned key with non-lower-bound spec", () => {
+    expect(categorize("lodash@<4.17.21", "^4.17.21")).toEqual({
+      kind: "skip",
+      reason: "non-lower-bound",
+    });
+  });
+
   it("nested-key takes precedence over protocol", () => {
     expect(categorize("foo>bar", "workspace:*")).toEqual({
       kind: "skip",
@@ -201,11 +282,18 @@ describe("categorize", () => {
     });
   });
 
-  it("nested-key takes precedence over versioned-key", () => {
+  it("nested-key takes precedence over selector parse", () => {
     // 'foo>bar@1.0.0' has '>' so it's nested first.
     expect(categorize("foo>bar@1.0.0", ">=1.0.0")).toEqual({
       kind: "skip",
       reason: "nested-key",
+    });
+  });
+
+  it("unsupported-selector takes precedence over protocol-spec", () => {
+    expect(categorize("foo@latest", "catalog:default")).toEqual({
+      kind: "skip",
+      reason: "unsupported-selector",
     });
   });
 

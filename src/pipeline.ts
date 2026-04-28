@@ -1,3 +1,4 @@
+import { intersects } from "semver";
 import {
   categorize,
   classify,
@@ -19,8 +20,8 @@ function skipReasonToValue(reason: SkipReason): string {
   switch (reason) {
     case "nested-key":
       return "(nested key)";
-    case "versioned-key":
-      return "(versioned key)";
+    case "unsupported-selector":
+      return "(unsupported selector)";
     case "protocol-spec":
       return "(protocol spec)";
     case "non-lower-bound":
@@ -79,16 +80,33 @@ export function evaluateOverride(
   if (cat.kind === "skip") {
     return { status: "skip", value: skipReasonToValue(cat.reason) };
   }
-  const specs = gatherSpecsForTarget(
-    override.key,
+  const allSpecs = gatherSpecsForTarget(
+    cat.name,
     lockfile,
     workspaceDirectDeps,
     registryData,
   );
-  if (specs.length === 0) {
+  if (allSpecs.length === 0) {
     return { status: "prune", value: "(unused)" };
   }
-  const targetMeta = registryData.get(override.key);
+  // pnpm fires a versioned-key override on parents whose requested spec
+  // intersects the selector range (see pnpm/pnpm#6904). Drop parent specs
+  // that don't intersect — the override is inert for them.
+  const selector = cat.selector;
+  const specs =
+    selector === null
+      ? allSpecs
+      : allSpecs.filter((s) => {
+          try {
+            return intersects(s, selector);
+          } catch {
+            return false;
+          }
+        });
+  if (specs.length === 0) {
+    return { status: "prune", value: "(selector miss)" };
+  }
+  const targetMeta = registryData.get(cat.name);
   if (targetMeta === undefined) {
     return { status: "error", value: "(registry miss)" };
   }
@@ -106,8 +124,8 @@ export function collectPackagesForOverride(
     return [];
   }
   const needed = new Set<string>();
-  needed.add(override.key);
-  const parents = lockfile.transitiveParents.get(override.key);
+  needed.add(cat.name);
+  const parents = lockfile.transitiveParents.get(cat.name);
   if (parents !== undefined) {
     for (const parent of parents) {
       const parsed = parseSnapshotKey(parent.parentKey);
