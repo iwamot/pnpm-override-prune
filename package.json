@@ -35,6 +35,7 @@
     "build": "bun build src/cli.ts --outfile dist/index.js --target node --packages external --banner \"#!/usr/bin/env node\"",
     "check": "biome check",
     "check:write": "biome check --write",
+    "prune": "bun src/cli.ts --fix",
     "typecheck": "tsc --noEmit",
     "test": "bun test --coverage --coverage-reporter=lcov --coverage-reporter=text"
   },
