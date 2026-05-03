@@ -6,11 +6,12 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   compatibility:
+    permissions:
+      contents: read
     uses: iwamot/workflows/.github/workflows/compatibility-node.yml@d1fbf4d009ef835741c9801626f014ef90a7dac2 # v1.4.0
     with:
       node-versions: '["20","22","24"]'
