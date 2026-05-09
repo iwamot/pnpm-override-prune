@@ -1,10 +1,7 @@
 # pnpm-override-prune
 
-[![Validate](https://github.com/iwamot/pnpm-override-prune/actions/workflows/validate.yml/badge.svg)](https://github.com/iwamot/pnpm-override-prune/actions/workflows/validate.yml)
-[![codecov](https://codecov.io/gh/iwamot/pnpm-override-prune/graph/badge.svg)](https://codecov.io/gh/iwamot/pnpm-override-prune)
 [![npm](https://img.shields.io/npm/v/pnpm-override-prune.svg)](https://www.npmjs.com/package/pnpm-override-prune)
-[![Node](https://img.shields.io/node/v/pnpm-override-prune.svg)](https://www.npmjs.com/package/pnpm-override-prune)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![node](https://img.shields.io/node/v/pnpm-override-prune.svg)](https://www.npmjs.com/package/pnpm-override-prune)
 
 Detect prunable override entries in pnpm / [aube](https://github.com/endevco/aube) projects.
 
