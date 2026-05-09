@@ -16,7 +16,7 @@ jobs:
     uses: iwamot/workflows/.github/workflows/oide.yml@5a1f669fe305576b4e8cbbbfda639745027d3902 # v4.1.0
     with:
       # renovate: datasource=github-tags depName=iwamot/repo-template
-      TEMPLATE_VERSION: v1.4.0
+      TEMPLATE_VERSION: v1.5.0
     secrets:
       RENOVATE_APP_ID: ${{ secrets.RENOVATE_APP_ID }}
       RENOVATE_PRIVATE_KEY: ${{ secrets.RENOVATE_PRIVATE_KEY }}
