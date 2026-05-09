@@ -1,4 +1,4 @@
-name: Publish
+name: Release
 
 on:
   push:
@@ -8,16 +8,18 @@ permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  publish-npm:
-    name: publish-npm
+  release:
+    name: release
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: production
     permissions:
-      contents: read
+      contents: write  # to manage the GitHub Release lifecycle
       id-token: write  # for npm Trusted Publishing OIDC
     steps:
+      - uses: iwamot/actions/release-draft@08456ce23ea73c42a50d71bd5a067d5ad68dc7e9 # v0.7.0
       - uses: iwamot/actions/npm-publish@08456ce23ea73c42a50d71bd5a067d5ad68dc7e9 # v0.7.0
+      - uses: iwamot/actions/release-publish@08456ce23ea73c42a50d71bd5a067d5ad68dc7e9 # v0.7.0
