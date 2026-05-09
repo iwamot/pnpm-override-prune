@@ -15,6 +15,8 @@ aube run check:write
 aube run typecheck
 aube run test
 aube run build
+# --no-git-checks lets the dry-run run on any branch (publish itself would still gate on main).
+aube publish --dry-run --no-git-checks
 
 # Run shared lint tasks
 mise run gha-lint
