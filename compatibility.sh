@@ -14,9 +14,8 @@ TARBALL="$PWD/$(npm pack --silent)"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"; rm -f "$TARBALL"' EXIT
 
-cd "$TMP"
-npm init --silent --yes >/dev/null
-npm install --silent --no-audit --no-fund "$TARBALL"
+(cd "$TMP" && npm init --silent --yes >/dev/null &&
+  npm install --silent --no-audit --no-fund "$TARBALL")
 
-./node_modules/.bin/pnpm-override-prune --version
-./node_modules/.bin/pnpm-override-prune --help >/dev/null
+"$TMP/node_modules/.bin/pnpm-override-prune" --version
+"$TMP/node_modules/.bin/pnpm-override-prune" --fix
