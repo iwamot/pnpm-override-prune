@@ -15,7 +15,7 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
     const parsed = nodeParseArgs({
       args: [...argv],
       options: {
-        version: { type: "boolean", short: "V" },
+        version: { type: "boolean", short: "v" },
         help: { type: "boolean", short: "h" },
         fix: { type: "boolean" },
       },
