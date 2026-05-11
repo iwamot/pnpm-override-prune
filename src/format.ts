@@ -72,7 +72,7 @@ export function formatHelp(): string {
     "",
     "Options:",
     "  --fix          Remove prunable entries in place",
-    "  -V, --version  Print the version and exit",
+    "  -v, --version  Print the version and exit",
     "  -h, --help     Print this help and exit",
     "",
   ].join("\n");

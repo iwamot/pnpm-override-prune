@@ -145,7 +145,7 @@ describe("formatHelp", () => {
     const text = formatHelp();
     expect(text).toContain("Usage: pnpm-override-prune");
     expect(text).toContain("--fix");
-    expect(text).toContain("-V, --version");
+    expect(text).toContain("-v, --version");
     expect(text).toContain("-h, --help");
   });
 });

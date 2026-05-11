@@ -2,8 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { decideRun } from "../src/run.ts";
 
 describe("decideRun", () => {
-  it("returns sync version output for -V", () => {
-    const result = decideRun(["-V"], "1.2.3");
+  it("returns sync version output for -v", () => {
+    const result = decideRun(["-v"], "1.2.3");
     expect(result).toEqual({
       kind: "sync",
       exitCode: 0,

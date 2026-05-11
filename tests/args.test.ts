@@ -10,8 +10,8 @@ describe("parseArgs", () => {
     });
   });
 
-  it("recognizes -V as a version request", () => {
-    expect(parseArgs(["-V"])).toEqual({ kind: "version" });
+  it("recognizes -v as a version request", () => {
+    expect(parseArgs(["-v"])).toEqual({ kind: "version" });
   });
 
   it("recognizes --version as a version request", () => {
