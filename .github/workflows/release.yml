@@ -20,6 +20,11 @@ jobs:
       contents: write  # to manage the GitHub Release lifecycle
       id-token: write  # for npm Trusted Publishing OIDC
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
+        with:
+          egress-policy: audit
+
       - uses: iwamot/actions/release-draft@35af46540ea16f3adb318c1a1739572b61f6fc53 # v0.8.0
       - uses: iwamot/actions/npm-publish@35af46540ea16f3adb318c1a1739572b61f6fc53 # v0.8.0
       - uses: iwamot/actions/release-publish@35af46540ea16f3adb318c1a1739572b61f6fc53 # v0.8.0
