@@ -40,7 +40,7 @@
     "test": "bun test --coverage --coverage-reporter=lcov --coverage-reporter=text"
   },
   "dependencies": {
-    "semver": "7.8.1",
+    "semver": "7.8.2",
     "yaml": "2.9.0"
   },
   "devDependencies": {
