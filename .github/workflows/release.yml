@@ -25,6 +25,6 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: iwamot/actions/release-draft@e26fd78393da9f5ea2134cbf1e7c50ceeec931ad # v2.0.0
-      - uses: iwamot/actions/npm-publish@e26fd78393da9f5ea2134cbf1e7c50ceeec931ad # v2.0.0
-      - uses: iwamot/actions/release-publish@e26fd78393da9f5ea2134cbf1e7c50ceeec931ad # v2.0.0
+      - uses: iwamot/actions/release-draft@dbe39b23ea600743e3fbb619d775ce08c61f753f # v2.0.1
+      - uses: iwamot/actions/npm-publish@dbe39b23ea600743e3fbb619d775ce08c61f753f # v2.0.1
+      - uses: iwamot/actions/release-publish@dbe39b23ea600743e3fbb619d775ce08c61f753f # v2.0.1
