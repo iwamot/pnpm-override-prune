@@ -3,7 +3,7 @@
 [![npm](https://img.shields.io/npm/v/pnpm-override-prune.svg)](https://www.npmjs.com/package/pnpm-override-prune)
 [![node](https://img.shields.io/node/v/pnpm-override-prune.svg)](https://www.npmjs.com/package/pnpm-override-prune)
 
-Detect prunable override entries in pnpm / [aube](https://github.com/endevco/aube) projects.
+Detect prunable override entries in pnpm / [aube](https://github.com/jdx/aube) projects.
 
 ## Usage
 
