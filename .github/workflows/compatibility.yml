@@ -13,6 +13,6 @@ jobs:
   compatibility:
     permissions:
       contents: read
-    uses: iwamot/workflows/.github/workflows/compatibility-node.yml@5a25b9d63627c844df2612e67ff51313b4d16b62 # v8.1.0
+    uses: iwamot/workflows/.github/workflows/compatibility-node.yml@086f2d88815451da2cba7dc9e6e044d86c66743c # v8.2.0
     with:
       node-versions: '["20","22","24"]'
