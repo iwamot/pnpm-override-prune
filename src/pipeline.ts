@@ -29,17 +29,30 @@ function skipReasonToValue(reason: SkipReason): string {
   }
 }
 
+export interface GatheredSpecs {
+  /** Semver specs that constrain the target without the override applied. */
+  readonly specs: readonly string[];
+  /**
+   * Direct importer specs using a non-semver protocol (`catalog:`,
+   * `workspace:`, ...). They do constrain the target, but the tool cannot
+   * turn them into a range, so the natural resolution is unknowable.
+   */
+  readonly protocolSpecs: readonly string[];
+}
+
 export function gatherSpecsForTarget(
   target: string,
   lockfile: Lockfile,
   workspaceDirectDeps: WorkspaceDirectDeps,
   registryData: ReadonlyMap<string, PackageMetadata>,
-): readonly string[] {
+): GatheredSpecs {
   const specs: string[] = [];
+  const protocolSpecs: string[] = [];
   const direct = workspaceDirectDeps.get(target);
   if (direct !== undefined) {
     for (const dep of direct) {
       if (hasProtocolPrefix(dep.spec)) {
+        protocolSpecs.push(dep.spec);
         continue;
       }
       specs.push(dep.spec);
@@ -67,7 +80,12 @@ export function gatherSpecsForTarget(
       specs.push(spec);
     }
   }
-  return specs;
+  return { specs, protocolSpecs };
+}
+
+function protocolOf(spec: string): string {
+  const colon = spec.indexOf(":");
+  return colon === -1 ? spec : spec.slice(0, colon + 1);
 }
 
 export function evaluateOverride(
@@ -80,12 +98,22 @@ export function evaluateOverride(
   if (cat.kind === "skip") {
     return { status: "skip", value: skipReasonToValue(cat.reason) };
   }
-  const allSpecs = gatherSpecsForTarget(
+  const { specs: allSpecs, protocolSpecs } = gatherSpecsForTarget(
     cat.name,
     lockfile,
     workspaceDirectDeps,
     registryData,
   );
+  // A protocol-prefixed direct dep still constrains the target, but its
+  // range is not visible here. Any verdict computed from the remaining
+  // specs would describe a different tree, so leave it for human review.
+  if (protocolSpecs.length > 0) {
+    const protocols = Array.from(new Set(protocolSpecs.map(protocolOf)));
+    return {
+      status: "skip",
+      value: `(constrained by ${protocols.join(", ")} spec)`,
+    };
+  }
   if (allSpecs.length === 0) {
     return { status: "prune", value: "(unused)" };
   }

@@ -75,17 +75,19 @@ describe("gatherSpecsForTarget", () => {
   it("collects specs from workspace direct deps", () => {
     const lockfile = makeLockfile({});
     const direct = makeWorkspaceDirectDeps({ foo: "^1.0.0" });
-    expect(gatherSpecsForTarget("foo", lockfile, direct, new Map())).toEqual([
-      "^1.0.0",
-    ]);
+    expect(gatherSpecsForTarget("foo", lockfile, direct, new Map())).toEqual({
+      specs: ["^1.0.0"],
+      protocolSpecs: [],
+    });
   });
 
-  it("skips workspace direct deps with protocol-prefixed specs", () => {
+  it("sets aside workspace direct deps with protocol-prefixed specs", () => {
     const lockfile = makeLockfile({});
     const direct = makeWorkspaceDirectDeps({ foo: "workspace:*" });
-    expect(gatherSpecsForTarget("foo", lockfile, direct, new Map())).toEqual(
-      [],
-    );
+    expect(gatherSpecsForTarget("foo", lockfile, direct, new Map())).toEqual({
+      specs: [],
+      protocolSpecs: ["workspace:*"],
+    });
   });
 
   it("collects specs from transitive parents via registry data", () => {
@@ -103,7 +105,7 @@ describe("gatherSpecsForTarget", () => {
     ]);
     expect(
       gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
-    ).toEqual([">=1.0.0", "<2.0.0"]);
+    ).toEqual({ specs: [">=1.0.0", "<2.0.0"], protocolSpecs: [] });
   });
 
   it("combines direct and transitive specs", () => {
@@ -116,10 +118,10 @@ describe("gatherSpecsForTarget", () => {
     const registry = new Map<string, PackageMetadata>([
       ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.2.0" } })],
     ]);
-    expect(gatherSpecsForTarget("target", lockfile, direct, registry)).toEqual([
-      "^1.0.0",
-      ">=1.2.0",
-    ]);
+    expect(gatherSpecsForTarget("target", lockfile, direct, registry)).toEqual({
+      specs: ["^1.0.0", ">=1.2.0"],
+      protocolSpecs: [],
+    });
   });
 
   it("skips parents whose snapshot key cannot be parsed", () => {
@@ -130,7 +132,7 @@ describe("gatherSpecsForTarget", () => {
     });
     expect(
       gatherSpecsForTarget("target", lockfile, NO_DIRECT, new Map()),
-    ).toEqual([]);
+    ).toEqual({ specs: [], protocolSpecs: [] });
   });
 
   it("skips parents whose registry metadata is missing", () => {
@@ -141,7 +143,7 @@ describe("gatherSpecsForTarget", () => {
     });
     expect(
       gatherSpecsForTarget("target", lockfile, NO_DIRECT, new Map()),
-    ).toEqual([]);
+    ).toEqual({ specs: [], protocolSpecs: [] });
   });
 
   it("skips parents whose version meta is missing", () => {
@@ -155,7 +157,7 @@ describe("gatherSpecsForTarget", () => {
     ]);
     expect(
       gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
-    ).toEqual([]);
+    ).toEqual({ specs: [], protocolSpecs: [] });
   });
 
   it("skips parents that don't list the target in their dependencies", () => {
@@ -169,13 +171,13 @@ describe("gatherSpecsForTarget", () => {
     ]);
     expect(
       gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
-    ).toEqual([]);
+    ).toEqual({ specs: [], protocolSpecs: [] });
   });
 
-  it("returns empty array when target is not present anywhere", () => {
+  it("returns nothing when target is not present anywhere", () => {
     expect(
       gatherSpecsForTarget("missing", makeLockfile({}), NO_DIRECT, new Map()),
-    ).toEqual([]);
+    ).toEqual({ specs: [], protocolSpecs: [] });
   });
 });
 
@@ -334,16 +336,66 @@ describe("evaluateOverride", () => {
     expect(result).toEqual({ status: "keep", value: "1.0.0" });
   });
 
-  it("treats target as unused when only direct dep spec is protocol-prefixed", () => {
+  it("skips when the only direct dep spec is protocol-prefixed instead of calling it unused", () => {
+    // pnpm.overrides: { lodash: ">=4.17.21" } with "lodash": "catalog:" in the
+    // importer. The catalog may pin ^3.10.0, in which case the override is
+    // what lifts the tree to 4.x — "(unused)" would be a destructive verdict.
     const lockfile = makeLockfile({});
-    const direct = makeWorkspaceDirectDeps({ foo: "workspace:*" });
+    const direct = makeWorkspaceDirectDeps({ lodash: "catalog:" });
     const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=1.0.0"),
+      PKG_OVERRIDE("lodash", ">=4.17.21"),
       lockfile,
       direct,
       new Map(),
     );
-    expect(result).toEqual({ status: "prune", value: "(unused)" });
+    expect(result).toEqual({
+      status: "skip",
+      value: "(constrained by catalog: spec)",
+    });
+  });
+
+  it("skips even when other specs exist, since the protocol spec's range is unknown", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        target: [{ parent: "parentA@1.0.0", resolved: "2.0.0" }],
+      },
+    });
+    const direct: WorkspaceDirectDeps = new Map([
+      [
+        "target",
+        [
+          {
+            importerKey: "packages/a",
+            depType: "dependencies",
+            spec: "^2.0.0",
+          },
+          {
+            importerKey: "packages/b",
+            depType: "dependencies",
+            spec: "workspace:*",
+          },
+          {
+            importerKey: "packages/c",
+            depType: "dependencies",
+            spec: "catalog:",
+          },
+        ],
+      ],
+    ]);
+    const registry = new Map<string, PackageMetadata>([
+      ["target", makeMetadata("target", { "2.0.0": {} })],
+      ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=2.0.0" } })],
+    ]);
+    const result = evaluateOverride(
+      PKG_OVERRIDE("target", ">=2.0.0"),
+      lockfile,
+      direct,
+      registry,
+    );
+    expect(result).toEqual({
+      status: "skip",
+      value: "(constrained by workspace:, catalog: spec)",
+    });
   });
 
   it("skips versioned keys with non-semver-range selector", () => {
