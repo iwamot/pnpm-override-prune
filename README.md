@@ -74,7 +74,7 @@ For each spec it computes the highest published version that spec would resolve 
 - Skips versioned keys whose selector isn't a parseable semver range (e.g., `"foo@latest": ">=1.0.0"`). pnpm itself falls back to literal-string matching for such selectors, so they're rarely effective; verdict is left for human review.
 - Each override entry is evaluated independently. When multiple entries target the same package (e.g., several `lodash@...` rows from cumulative `pnpm audit --fix` runs), the tool won't propose consolidating them into a single stronger entry — it only marks each one prunable when its own selector/spec combination is a no-op against the natural resolution.
 - Public npm registry only. Private registries and `.npmrc` scoped registry configuration are not consulted.
-- Parents that aren't on the public registry — e.g. workspace-internal packages resolved as transitive parents — are silently dropped from the constraint set. The natural resolution may then appear less constrained than it actually is.
+- Parents that the public registry doesn't know (HTTP 404) — e.g. workspace-internal packages resolved as transitive parents — are silently dropped from the constraint set. The natural resolution may then appear less constrained than it actually is. Any other fetch failure (network error, non-404 status, malformed metadata) marks the entry `[ERROR] (fetch failed: <package>)` instead of judging it, so a flaky connection can't make an override look unused.
 
 ## License
 

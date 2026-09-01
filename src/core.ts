@@ -19,6 +19,7 @@ import {
 } from "./manifest.ts";
 import {
   type AuditEntry,
+  collectNeededRegistryPackages,
   collectPackagesForOverride,
   evaluateOverride,
 } from "./pipeline.ts";
@@ -178,20 +179,17 @@ export async function runAudit(
     return 2;
   }
 
-  // Pre-fire all registry fetches in parallel; output streams in entry order
-  // and awaits only the per-entry subset, so per-entry latency is bounded by
-  // the slowest fetch needed for that single entry.
+  // Pre-fire all registry fetches in parallel; the client caches each
+  // promise, so output can stream in entry order and await only the
+  // per-entry subset. A failed fetch is reported once here; the entries
+  // that needed it are marked [ERROR] as they stream.
   const client = createNpmRegistryClient();
-  const fetchPromises = new Map<string, Promise<PackageMetadata | null>>();
-  for (const override of allOverrides) {
-    for (const name of collectPackagesForOverride(override, lockfile)) {
-      if (!fetchPromises.has(name)) {
-        fetchPromises.set(
-          name,
-          client.fetchPackage(name).catch(() => null),
-        );
+  for (const name of collectNeededRegistryPackages(allOverrides, lockfile)) {
+    void client.fetchPackage(name).then((outcome) => {
+      if (outcome.kind === "failed") {
+        emitError(outcome.message);
       }
-    }
+    });
   }
 
   const collectedEntries: AuditEntry[] = [];
@@ -205,17 +203,18 @@ export async function runAudit(
     process.stdout.write(formatSectionHeader(source, sectionEntries.length));
     const width = entryWidth(sectionEntries);
     for (const override of sectionEntries) {
-      const required = collectPackagesForOverride(override, lockfile);
-      const data = await Promise.all(
-        required.map(
-          (name) => fetchPromises.get(name) ?? Promise.resolve(null),
-        ),
+      const fetched = await Promise.all(
+        collectPackagesForOverride(override, lockfile).map(async (name) => ({
+          name,
+          outcome: await client.fetchPackage(name),
+        })),
       );
-      const dataMap = new Map<string, PackageMetadata>();
-      for (const [i, name] of required.entries()) {
-        const meta = data[i];
-        if (meta !== null && meta !== undefined) {
-          dataMap.set(name, meta);
+      const dataMap = new Map<string, PackageMetadata | null>();
+      for (const { name, outcome } of fetched) {
+        if (outcome.kind === "found") {
+          dataMap.set(name, outcome.metadata);
+        } else if (outcome.kind === "failed") {
+          dataMap.set(name, null);
         }
       }
       const result = evaluateOverride(

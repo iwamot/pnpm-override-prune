@@ -29,6 +29,13 @@ function skipReasonToValue(reason: SkipReason): string {
   }
 }
 
+/**
+ * Registry metadata keyed by package name. A package the registry doesn't
+ * know is absent; a package whose fetch failed for any other reason maps to
+ * `null`, so the failure can't pass for "no constraint".
+ */
+export type RegistryData = ReadonlyMap<string, PackageMetadata | null>;
+
 export interface GatheredSpecs {
   /** Semver specs that constrain the target without the override applied. */
   readonly specs: readonly string[];
@@ -44,7 +51,7 @@ export function gatherSpecsForTarget(
   target: string,
   lockfile: Lockfile,
   workspaceDirectDeps: WorkspaceDirectDeps,
-  registryData: ReadonlyMap<string, PackageMetadata>,
+  registryData: RegistryData,
 ): GatheredSpecs {
   const specs: string[] = [];
   const protocolSpecs: string[] = [];
@@ -66,7 +73,7 @@ export function gatherSpecsForTarget(
         continue;
       }
       const meta = registryData.get(parsed.name);
-      if (meta === undefined) {
+      if (meta === undefined || meta === null) {
         continue;
       }
       const versionMeta = meta.versions.get(parsed.version);
@@ -92,11 +99,19 @@ export function evaluateOverride(
   override: Override,
   lockfile: Lockfile,
   workspaceDirectDeps: WorkspaceDirectDeps,
-  registryData: ReadonlyMap<string, PackageMetadata>,
+  registryData: RegistryData,
 ): Result {
   const cat = categorize(override.key, override.spec);
   if (cat.kind === "skip") {
     return { status: "skip", value: skipReasonToValue(cat.reason) };
+  }
+  // A verdict computed without a parent's constraints would describe a
+  // different tree, so a fetch failure is an error rather than a guess.
+  const failed = packagesForTarget(cat.name, lockfile).filter(
+    (name) => registryData.get(name) === null,
+  );
+  if (failed.length > 0) {
+    return { status: "error", value: `(fetch failed: ${failed.join(", ")})` };
   }
   const { specs: allSpecs, protocolSpecs } = gatherSpecsForTarget(
     cat.name,
@@ -135,12 +150,30 @@ export function evaluateOverride(
     return { status: "prune", value: "(selector miss)" };
   }
   const targetMeta = registryData.get(cat.name);
-  if (targetMeta === undefined) {
+  if (targetMeta === undefined || targetMeta === null) {
     return { status: "error", value: "(registry miss)" };
   }
   const candidates = Array.from(targetMeta.versions.keys());
   const natural = computeNaturalResolution(specs, candidates);
   return classify(override.spec, natural);
+}
+
+function packagesForTarget(
+  target: string,
+  lockfile: Lockfile,
+): readonly string[] {
+  const needed = new Set<string>();
+  needed.add(target);
+  const parents = lockfile.transitiveParents.get(target);
+  if (parents !== undefined) {
+    for (const parent of parents) {
+      const parsed = parseSnapshotKey(parent.parentKey);
+      if (parsed !== null) {
+        needed.add(parsed.name);
+      }
+    }
+  }
+  return Array.from(needed);
 }
 
 export function collectPackagesForOverride(
@@ -151,18 +184,7 @@ export function collectPackagesForOverride(
   if (cat.kind !== "target") {
     return [];
   }
-  const needed = new Set<string>();
-  needed.add(cat.name);
-  const parents = lockfile.transitiveParents.get(cat.name);
-  if (parents !== undefined) {
-    for (const parent of parents) {
-      const parsed = parseSnapshotKey(parent.parentKey);
-      if (parsed !== null) {
-        needed.add(parsed.name);
-      }
-    }
-  }
-  return Array.from(needed);
+  return packagesForTarget(cat.name, lockfile);
 }
 
 export function collectNeededRegistryPackages(

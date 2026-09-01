@@ -179,6 +179,20 @@ describe("gatherSpecsForTarget", () => {
       gatherSpecsForTarget("missing", makeLockfile({}), NO_DIRECT, new Map()),
     ).toEqual({ specs: [], protocolSpecs: [] });
   });
+
+  it("drops parents whose fetch failed", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        target: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
+      },
+    });
+    const registry = new Map<string, PackageMetadata | null>([
+      ["parentA", null],
+    ]);
+    expect(
+      gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
+    ).toEqual({ specs: [], protocolSpecs: [] });
+  });
 });
 
 describe("evaluateOverride", () => {
@@ -220,6 +234,47 @@ describe("evaluateOverride", () => {
       new Map(),
     );
     expect(result).toEqual({ status: "prune", value: "(unused)" });
+  });
+
+  it("returns error, not prune, when a parent fetch failed", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
+      },
+    });
+    const registry = new Map<string, PackageMetadata | null>([
+      ["parentA", null],
+      ["foo", makeMetadata("foo", { "1.0.0": {}, "1.2.0": {} })],
+    ]);
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=1.0.0"),
+      lockfile,
+      NO_DIRECT,
+      registry,
+    );
+    expect(result).toEqual({
+      status: "error",
+      value: "(fetch failed: parentA)",
+    });
+  });
+
+  it("returns error when the target fetch failed", () => {
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
+      },
+    });
+    const registry = new Map<string, PackageMetadata | null>([
+      ["parentA", makeMetadata("parentA", { "1.0.0": { foo: "^1.0.0" } })],
+      ["foo", null],
+    ]);
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=1.0.0"),
+      lockfile,
+      NO_DIRECT,
+      registry,
+    );
+    expect(result).toEqual({ status: "error", value: "(fetch failed: foo)" });
   });
 
   it("returns error when target has no registry metadata", () => {
