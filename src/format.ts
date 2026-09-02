@@ -11,6 +11,8 @@ export const LABELS = {
 export const SOURCE_ORDER: readonly OverrideSource[] = [
   "package.json:overrides",
   "package.json:pnpm.overrides",
+  "package.json:aube.overrides",
+  "package.json:resolutions",
   "pnpm-workspace.yaml",
   "aube-workspace.yaml",
 ];

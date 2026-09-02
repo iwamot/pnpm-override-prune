@@ -1,15 +1,24 @@
 import { describe, expect, it } from "bun:test";
+import type { PackageJsonContainer } from "../src/manifest.ts";
 import {
+  type PackageJsonRemoval,
   removeFromPackageJson,
   removeFromWorkspaceYaml,
 } from "../src/rewrite.ts";
 
+function only(
+  container: PackageJsonContainer,
+  keys: readonly string[],
+): PackageJsonRemoval {
+  return new Map([[container, keys]]);
+}
+
 function pnpm(keys: readonly string[]) {
-  return { fromPnpmOverrides: keys, fromTopLevelOverrides: [] as string[] };
+  return only("package.json:pnpm.overrides", keys);
 }
 
 function topLevel(keys: readonly string[]) {
-  return { fromPnpmOverrides: [] as string[], fromTopLevelOverrides: keys };
+  return only("package.json:overrides", keys);
 }
 
 describe("removeFromPackageJson", () => {
@@ -57,10 +66,13 @@ describe("removeFromPackageJson", () => {
   "overrides": { "c": "3", "d": "4" }
 }
 `;
-    const after = removeFromPackageJson(before, {
-      fromPnpmOverrides: ["a"],
-      fromTopLevelOverrides: ["d"],
-    });
+    const after = removeFromPackageJson(
+      before,
+      new Map([
+        ["package.json:pnpm.overrides", ["a"]],
+        ["package.json:overrides", ["d"]],
+      ]),
+    );
     const parsed = JSON.parse(after) as Record<string, unknown>;
     const pnpmField = parsed.pnpm as Record<string, unknown>;
     expect(Object.keys(pnpmField.overrides as Record<string, unknown>)).toEqual(
@@ -105,13 +117,49 @@ describe("removeFromPackageJson", () => {
     expect(after).toContain("\t");
   });
 
-  it("returns content unchanged when both removal lists are empty", () => {
+  it("returns content unchanged when every removal list is empty", () => {
     const before = `{"pnpm":{"overrides":{"foo":">=1.0.0"}}}`;
     expect(
-      removeFromPackageJson(before, {
-        fromPnpmOverrides: [],
-        fromTopLevelOverrides: [],
-      }),
+      removeFromPackageJson(
+        before,
+        new Map([
+          ["package.json:pnpm.overrides", []],
+          ["package.json:overrides", []],
+        ]),
+      ),
+    ).toBe(before);
+    expect(removeFromPackageJson(before, new Map())).toBe(before);
+  });
+
+  it("removes the given keys from aube.overrides", () => {
+    const before = `{"aube":{"overrides":{"foo":">=1.0.0","bar":">=2.0.0"}}}`;
+    const after = removeFromPackageJson(
+      before,
+      only("package.json:aube.overrides", ["foo"]),
+    );
+    const parsed = JSON.parse(after) as Record<string, unknown>;
+    const aubeField = parsed.aube as Record<string, unknown>;
+    expect(Object.keys(aubeField.overrides as Record<string, unknown>)).toEqual(
+      ["bar"],
+    );
+  });
+
+  it("removes the given keys from resolutions", () => {
+    const before = `{"resolutions":{"foo":">=1.0.0","bar":">=2.0.0"}}`;
+    const after = removeFromPackageJson(
+      before,
+      only("package.json:resolutions", ["bar"]),
+    );
+    const parsed = JSON.parse(after) as Record<string, unknown>;
+    expect(Object.keys(parsed.resolutions as Record<string, unknown>)).toEqual([
+      "foo",
+    ]);
+  });
+
+  it("returns content unchanged when resolutions is absent", () => {
+    const before = `{"name":"x"}`;
+    expect(
+      removeFromPackageJson(before, only("package.json:resolutions", ["foo"])),
     ).toBe(before);
   });
 

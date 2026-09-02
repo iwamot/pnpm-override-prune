@@ -1,4 +1,9 @@
 import { isMap, parseDocument } from "yaml";
+import {
+  PACKAGE_JSON_CONTAINERS,
+  type PackageJsonContainer,
+  packageJsonMappingAt,
+} from "./manifest.ts";
 
 function isObject(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null && !Array.isArray(x);
@@ -12,19 +17,16 @@ function detectJsonIndent(content: string): string | number {
   return 2;
 }
 
-export interface PackageJsonRemoval {
-  readonly fromPnpmOverrides: readonly string[];
-  readonly fromTopLevelOverrides: readonly string[];
-}
+export type PackageJsonRemoval = ReadonlyMap<
+  PackageJsonContainer,
+  readonly string[]
+>;
 
 export function removeFromPackageJson(
   content: string,
   removal: PackageJsonRemoval,
 ): string {
-  if (
-    removal.fromPnpmOverrides.length === 0 &&
-    removal.fromTopLevelOverrides.length === 0
-  ) {
+  if ([...removal.values()].every((keys) => keys.length === 0)) {
     return content;
   }
   const parsed: unknown = JSON.parse(content);
@@ -32,26 +34,22 @@ export function removeFromPackageJson(
     return content;
   }
   let modified = false;
-  if (removal.fromPnpmOverrides.length > 0) {
-    const pnpmField = parsed.pnpm;
-    if (isObject(pnpmField)) {
-      const overrides = pnpmField.overrides;
-      if (isObject(overrides)) {
-        for (const key of removal.fromPnpmOverrides) {
-          delete overrides[key];
-        }
-        modified = true;
-      }
+  for (const [container, keys] of removal) {
+    if (keys.length === 0) {
+      continue;
     }
-  }
-  if (removal.fromTopLevelOverrides.length > 0) {
-    const overrides = parsed.overrides;
-    if (isObject(overrides)) {
-      for (const key of removal.fromTopLevelOverrides) {
-        delete overrides[key];
-      }
-      modified = true;
+    const path = PACKAGE_JSON_CONTAINERS.get(container);
+    if (path === undefined) {
+      continue;
     }
+    const mapping = packageJsonMappingAt(parsed, path);
+    if (mapping === null) {
+      continue;
+    }
+    for (const key of keys) {
+      delete mapping[key];
+    }
+    modified = true;
   }
   if (!modified) {
     return content;
