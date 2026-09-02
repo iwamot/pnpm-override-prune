@@ -13,6 +13,7 @@ import { type Lockfile, parseLockfile } from "./lockfile.ts";
 import {
   buildWorkspaceDirectDeps,
   type Override,
+  type PackageJsonContainer,
   parsePackageJsonOverrides,
   parseWorkspaceOverrides,
   type WorkspaceDirectDeps,
@@ -98,44 +99,28 @@ async function applyFix(
   workspace: FoundFile | null,
   entries: readonly AuditEntry[],
 ): Promise<void> {
-  const fromPnpmOverrides: string[] = [];
-  const fromTopLevelOverrides: string[] = [];
-  const byPnpmWorkspace: string[] = [];
-  const byAubeWorkspace: string[] = [];
+  const fromPackageJson = new Map<PackageJsonContainer, string[]>();
+  const fromWorkspace: string[] = [];
   for (const entry of entries) {
     if (entry.result.status !== "prune") {
       continue;
     }
-    switch (entry.override.source) {
-      case "package.json:pnpm.overrides":
-        fromPnpmOverrides.push(entry.override.key);
-        break;
-      case "package.json:overrides":
-        fromTopLevelOverrides.push(entry.override.key);
-        break;
-      case "pnpm-workspace.yaml":
-        byPnpmWorkspace.push(entry.override.key);
-        break;
-      case "aube-workspace.yaml":
-        byAubeWorkspace.push(entry.override.key);
-        break;
+    const source = entry.override.source;
+    if (source === "pnpm-workspace.yaml" || source === "aube-workspace.yaml") {
+      fromWorkspace.push(entry.override.key);
+    } else {
+      const keys = fromPackageJson.get(source) ?? [];
+      keys.push(entry.override.key);
+      fromPackageJson.set(source, keys);
     }
   }
-  if (fromPnpmOverrides.length > 0 || fromTopLevelOverrides.length > 0) {
-    const updated = removeFromPackageJson(packageJsonContent, {
-      fromPnpmOverrides,
-      fromTopLevelOverrides,
-    });
+  if (fromPackageJson.size > 0) {
+    const updated = removeFromPackageJson(packageJsonContent, fromPackageJson);
     await writeFile(packageJsonPath, updated);
   }
-  if (workspace !== null) {
-    const wsName = workspaceFilenameFromPath(workspace.path);
-    const keys =
-      wsName === "aube-workspace.yaml" ? byAubeWorkspace : byPnpmWorkspace;
-    if (keys.length > 0) {
-      const updated = removeFromWorkspaceYaml(workspace.content, keys);
-      await writeFile(workspace.path, updated);
-    }
+  if (workspace !== null && fromWorkspace.length > 0) {
+    const updated = removeFromWorkspaceYaml(workspace.content, fromWorkspace);
+    await writeFile(workspace.path, updated);
   }
 }
 

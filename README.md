@@ -38,7 +38,7 @@ Exit codes:
 
 ## Why
 
-pnpm and aube let you pin a transitive dependency version via override entries — in `package.json` (`pnpm.overrides` or top-level `overrides`) or in `pnpm-workspace.yaml` / `aube-workspace.yaml` (top-level `overrides:`).
+pnpm and aube let you pin a transitive dependency version via override entries — in `package.json` (`pnpm.overrides`, `aube.overrides`, top-level `overrides`, or Yarn-style `resolutions`) or in `pnpm-workspace.yaml` / `aube-workspace.yaml` (top-level `overrides:`).
 
 A common reason to reach for these is CVE mitigation: a vulnerability is disclosed in a transitive package, and you force the patched minimum version while direct deps catch up.
 
@@ -60,8 +60,10 @@ For each spec it computes the highest published version that spec would resolve 
 - Reads override entries from:
   - `package.json` &rarr; `pnpm.overrides`
   - `package.json` &rarr; top-level `overrides` (npm-compatible form, also used by `aube audit --fix`)
+  - `package.json` &rarr; `aube.overrides` (read by aube)
+  - `package.json` &rarr; `resolutions` (Yarn-compatible form, read by pnpm 9/10 and aube)
   - `pnpm-workspace.yaml` or `aube-workspace.yaml` &rarr; top-level `overrides:`
-- When a key appears in both `pnpm.overrides` and top-level `overrides`, both are reported independently. pnpm gives `pnpm.overrides` precedence at install time, but stale duplicates in the other location are easy to overlook.
+- When a key appears in more than one of these locations, each is reported independently. Which one wins at install time depends on the package manager, but stale duplicates in the other locations are easy to overlook.
 - Only specifiers using `>=` and/or `>` are checked. Exact pins (`1.2.3`), caret (`^1.2.3`), tilde (`~1.2.3`), and bounded ranges are skipped — removing an intentional upper bound is unsafe.
 - Versioned keys like `"glob-parent@<5.1.2": ">=5.1.2"` (the form `pnpm audit --fix` typically emits) are evaluated. The selector is matched against each parent's requested spec via [`semver.intersects`](https://github.com/npm/node-semver#ranges-1) — the rule pnpm itself uses since [pnpm/pnpm#6904](https://github.com/pnpm/pnpm/pull/6904).
 - Lockfile must be `pnpm-lock.yaml` or `aube-lock.yaml` at `lockfileVersion: '9.0'` (pnpm 9+ / aube). Older formats are not supported in this release.

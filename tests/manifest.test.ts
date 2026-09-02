@@ -116,8 +116,8 @@ describe("parsePackageJsonOverrides", () => {
       },
     });
     expect(parsePackageJsonOverrides(content)).toEqual([
-      { key: "a", spec: ">=1.0.0", source: "package.json:pnpm.overrides" },
       { key: "b", spec: ">=2.0.0", source: "package.json:overrides" },
+      { key: "a", spec: ">=1.0.0", source: "package.json:pnpm.overrides" },
     ]);
   });
 
@@ -127,13 +127,52 @@ describe("parsePackageJsonOverrides", () => {
       overrides: { foo: ">=1.0.0" },
     });
     expect(parsePackageJsonOverrides(content)).toEqual([
-      { key: "foo", spec: ">=2.0.0", source: "package.json:pnpm.overrides" },
       { key: "foo", spec: ">=1.0.0", source: "package.json:overrides" },
+      { key: "foo", spec: ">=2.0.0", source: "package.json:pnpm.overrides" },
     ]);
   });
 
   it("returns empty array when top-level overrides is not a mapping", () => {
     expect(parsePackageJsonOverrides('{"overrides":"oops"}')).toEqual([]);
+  });
+
+  it("collects entries from aube.overrides", () => {
+    const content = JSON.stringify({
+      aube: { overrides: { foo: ">=1.0.0" } },
+    });
+    expect(parsePackageJsonOverrides(content)).toEqual([
+      { key: "foo", spec: ">=1.0.0", source: "package.json:aube.overrides" },
+    ]);
+  });
+
+  it("collects entries from resolutions (Yarn-style)", () => {
+    const content = JSON.stringify({
+      resolutions: { foo: ">=1.0.0" },
+    });
+    expect(parsePackageJsonOverrides(content)).toEqual([
+      { key: "foo", spec: ">=1.0.0", source: "package.json:resolutions" },
+    ]);
+  });
+
+  it("collects from all four package.json containers in source order", () => {
+    const content = JSON.stringify({
+      resolutions: { d: ">=4.0.0" },
+      aube: { overrides: { c: ">=3.0.0" } },
+      pnpm: { overrides: { b: ">=2.0.0" } },
+      overrides: { a: ">=1.0.0" },
+    });
+    expect(parsePackageJsonOverrides(content)).toEqual([
+      { key: "a", spec: ">=1.0.0", source: "package.json:overrides" },
+      { key: "b", spec: ">=2.0.0", source: "package.json:pnpm.overrides" },
+      { key: "c", spec: ">=3.0.0", source: "package.json:aube.overrides" },
+      { key: "d", spec: ">=4.0.0", source: "package.json:resolutions" },
+    ]);
+  });
+
+  it("returns empty array when aube field or resolutions is not a mapping", () => {
+    expect(parsePackageJsonOverrides('{"aube":"oops"}')).toEqual([]);
+    expect(parsePackageJsonOverrides('{"aube":{"overrides":[]}}')).toEqual([]);
+    expect(parsePackageJsonOverrides('{"resolutions":"oops"}')).toEqual([]);
   });
 });
 

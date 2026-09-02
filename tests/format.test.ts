@@ -34,10 +34,12 @@ describe("LABELS", () => {
 });
 
 describe("SOURCE_ORDER", () => {
-  it("places top-level overrides first, then pnpm.overrides, then workspace yamls", () => {
+  it("places package.json containers first, then workspace yamls", () => {
     expect(SOURCE_ORDER).toEqual([
       "package.json:overrides",
       "package.json:pnpm.overrides",
+      "package.json:aube.overrides",
+      "package.json:resolutions",
       "pnpm-workspace.yaml",
       "aube-workspace.yaml",
     ]);

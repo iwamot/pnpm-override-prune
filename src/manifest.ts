@@ -2,9 +2,25 @@ import { parse as parseYaml } from "yaml";
 
 export type WorkspaceFilename = "pnpm-workspace.yaml" | "aube-workspace.yaml";
 export type PackageJsonContainer =
+  | "package.json:overrides"
   | "package.json:pnpm.overrides"
-  | "package.json:overrides";
+  | "package.json:aube.overrides"
+  | "package.json:resolutions";
 export type OverrideSource = PackageJsonContainer | WorkspaceFilename;
+
+// Every place a root package.json can hold overrides, as the key path to the
+// mapping. pnpm 9/10 read `pnpm.overrides` and Yarn's `resolutions`; aube reads
+// all four. Which one wins at install time is not modelled: each entry is
+// audited on its own, so a stale duplicate in any location is still reported.
+export const PACKAGE_JSON_CONTAINERS: ReadonlyMap<
+  PackageJsonContainer,
+  readonly string[]
+> = new Map([
+  ["package.json:overrides", ["overrides"]],
+  ["package.json:pnpm.overrides", ["pnpm", "overrides"]],
+  ["package.json:aube.overrides", ["aube", "overrides"]],
+  ["package.json:resolutions", ["resolutions"]],
+]);
 
 export interface Override {
   readonly key: string;
@@ -44,6 +60,20 @@ function isObject(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
 
+export function packageJsonMappingAt(
+  root: Record<string, unknown>,
+  path: readonly string[],
+): Record<string, unknown> | null {
+  let node: unknown = root;
+  for (const key of path) {
+    if (!isObject(node)) {
+      return null;
+    }
+    node = node[key];
+  }
+  return isObject(node) ? node : null;
+}
+
 function collectOverridesFromMap(
   obj: Record<string, unknown>,
   source: OverrideSource,
@@ -79,23 +109,11 @@ export function parsePackageJsonOverrides(
     return [];
   }
   const result: Override[] = [];
-  const pnpmField = parsed.pnpm;
-  if (isObject(pnpmField)) {
-    const pnpmOverrides = pnpmField.overrides;
-    if (isObject(pnpmOverrides)) {
-      result.push(
-        ...collectOverridesFromMap(
-          pnpmOverrides,
-          "package.json:pnpm.overrides",
-        ),
-      );
+  for (const [source, path] of PACKAGE_JSON_CONTAINERS) {
+    const mapping = packageJsonMappingAt(parsed, path);
+    if (mapping !== null) {
+      result.push(...collectOverridesFromMap(mapping, source));
     }
-  }
-  const topLevelOverrides = parsed.overrides;
-  if (isObject(topLevelOverrides)) {
-    result.push(
-      ...collectOverridesFromMap(topLevelOverrides, "package.json:overrides"),
-    );
   }
   return result;
 }
