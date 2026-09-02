@@ -34,7 +34,7 @@ Exit codes:
 |------|---------|
 | `0`  | No prunable entries (or `--fix` succeeded) |
 | `1`  | Prunable entries found (without `--fix`) |
-| `2`  | `package.json` or lockfile not found, or parse error |
+| `2`  | `package.json` or lockfile not found, parse error, or an entry marked `[ERROR]` (the audit is incomplete, even when other entries were pruned) |
 
 ## Why
 
