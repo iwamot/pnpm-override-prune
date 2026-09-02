@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import {
   entryWidth,
+  exitCodeFor,
   formatLine,
   formatSectionHeader,
   formatSummary,
@@ -194,6 +195,7 @@ export async function runAudit(
 
   const collectedEntries: AuditEntry[] = [];
   let prunableCount = 0;
+  let errorCount = 0;
 
   for (const source of SOURCE_ORDER) {
     const sectionEntries = allOverrides.filter((o) => o.source === source);
@@ -227,26 +229,24 @@ export async function runAudit(
       collectedEntries.push(entry);
       if (result.status === "prune") {
         prunableCount++;
+      } else if (result.status === "error") {
+        errorCount++;
       }
       process.stdout.write(formatLine(entry, width));
     }
     process.stdout.write("\n");
   }
 
-  if (fix && prunableCount > 0) {
+  const fixed = fix && prunableCount > 0;
+  if (fixed) {
     await applyFix(
       packageJsonPath,
       packageJsonContent,
       workspace,
       collectedEntries,
     );
-    process.stdout.write(formatSummary({ prunableCount, fixed: true }));
-    return 0;
   }
-  if (prunableCount > 0) {
-    process.stdout.write(formatSummary({ prunableCount, fixed: false }));
-    return 1;
-  }
-  process.stdout.write(formatSummary({ prunableCount: 0, fixed: false }));
-  return 0;
+  const summary = { prunableCount, errorCount, fixed };
+  process.stdout.write(formatSummary(summary));
+  return exitCodeFor(summary);
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   entryDisplay,
   entryWidth,
+  exitCodeFor,
   formatHelp,
   formatLine,
   formatSectionHeader,
@@ -104,32 +105,84 @@ describe("formatLine", () => {
 
 describe("formatSummary", () => {
   it("clean (no prunable, not fixed)", () => {
-    expect(formatSummary({ prunableCount: 0, fixed: false })).toBe(
-      "No prunable entries found.\n",
-    );
+    expect(
+      formatSummary({ prunableCount: 0, errorCount: 0, fixed: false }),
+    ).toBe("No prunable entries found.\n");
   });
 
   it("clean after fix (no prunable, fixed)", () => {
-    expect(formatSummary({ prunableCount: 0, fixed: true })).toBe(
-      "No prunable entries found.\n",
-    );
+    expect(
+      formatSummary({ prunableCount: 0, errorCount: 0, fixed: true }),
+    ).toBe("No prunable entries found.\n");
   });
 
   it("prunable found, not fixed", () => {
-    expect(formatSummary({ prunableCount: 2, fixed: false })).toBe(
-      "Run with --fix to prune entries marked [PRUNE].\n",
-    );
+    expect(
+      formatSummary({ prunableCount: 2, errorCount: 0, fixed: false }),
+    ).toBe("Run with --fix to prune entries marked [PRUNE].\n");
   });
 
   it("prunable fixed (singular)", () => {
-    expect(formatSummary({ prunableCount: 1, fixed: true })).toBe(
-      "Pruned 1 entry.\n",
-    );
+    expect(
+      formatSummary({ prunableCount: 1, errorCount: 0, fixed: true }),
+    ).toBe("Pruned 1 entry.\n");
   });
 
   it("prunable fixed (plural)", () => {
-    expect(formatSummary({ prunableCount: 5, fixed: true })).toBe(
-      "Pruned 5 entries.\n",
+    expect(
+      formatSummary({ prunableCount: 5, errorCount: 0, fixed: true }),
+    ).toBe("Pruned 5 entries.\n");
+  });
+
+  it("errors only (singular)", () => {
+    expect(
+      formatSummary({ prunableCount: 0, errorCount: 1, fixed: false }),
+    ).toBe("No prunable entries found.\n1 entry could not be evaluated.\n");
+  });
+
+  it("errors alongside prunable (plural)", () => {
+    expect(
+      formatSummary({ prunableCount: 2, errorCount: 3, fixed: false }),
+    ).toBe(
+      "Run with --fix to prune entries marked [PRUNE].\n3 entries could not be evaluated.\n",
+    );
+  });
+
+  it("errors alongside fixed", () => {
+    expect(
+      formatSummary({ prunableCount: 1, errorCount: 2, fixed: true }),
+    ).toBe("Pruned 1 entry.\n2 entries could not be evaluated.\n");
+  });
+});
+
+describe("exitCodeFor", () => {
+  it("0 when clean", () => {
+    expect(exitCodeFor({ prunableCount: 0, errorCount: 0, fixed: false })).toBe(
+      0,
+    );
+  });
+
+  it("1 when prunable and not fixed", () => {
+    expect(exitCodeFor({ prunableCount: 2, errorCount: 0, fixed: false })).toBe(
+      1,
+    );
+  });
+
+  it("0 when prunable and fixed", () => {
+    expect(exitCodeFor({ prunableCount: 2, errorCount: 0, fixed: true })).toBe(
+      0,
+    );
+  });
+
+  it("2 when any entry errored, even alongside prunable or fixed", () => {
+    expect(exitCodeFor({ prunableCount: 0, errorCount: 1, fixed: false })).toBe(
+      2,
+    );
+    expect(exitCodeFor({ prunableCount: 2, errorCount: 1, fixed: false })).toBe(
+      2,
+    );
+    expect(exitCodeFor({ prunableCount: 2, errorCount: 1, fixed: true })).toBe(
+      2,
     );
   });
 });
