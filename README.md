@@ -70,7 +70,7 @@ For each spec it computes the highest published version that spec would resolve 
 
 - Skips values using non-semver protocols (`catalog:`, `workspace:`, `file:`, `link:`, `portal:`, `npm:`, `github:`, `git`-prefixed, `http:` / `https:`).
 - Skips entries whose target is a direct dependency declared with such a protocol in any workspace `package.json` (e.g. `"lodash": "catalog:"`), reported as `[SKIP] (constrained by catalog: spec)`. That spec does constrain the target, but its range isn't visible to the tool, so no verdict is computed rather than treating the entry as unused.
-- Skips nested-key overrides like `"parent>child": "1.2.3"`. Only flat `name &rarr; spec` mappings are evaluated.
+- Skips nested-key overrides like `"parent>child": "1.2.3"`, including npm's object form `"parent": { "child": "1.2.3" }` (reported as `parent>child`). Only flat `name &rarr; spec` mappings are evaluated.
 - Skips versioned keys whose selector isn't a parseable semver range (e.g., `"foo@latest": ">=1.0.0"`). pnpm itself falls back to literal-string matching for such selectors, so they're rarely effective; verdict is left for human review.
 - Each override entry is evaluated independently. When multiple entries target the same package (e.g., several `lodash@...` rows from cumulative `pnpm audit --fix` runs), the tool won't propose consolidating them into a single stronger entry — it only marks each one prunable when its own selector/spec combination is a no-op against the natural resolution.
 - Public npm registry only. Private registries and `.npmrc` scoped registry configuration are not consulted.

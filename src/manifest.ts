@@ -47,11 +47,18 @@ function isObject(x: unknown): x is Record<string, unknown> {
 function collectOverridesFromMap(
   obj: Record<string, unknown>,
   source: OverrideSource,
+  parentKey = "",
 ): Override[] {
   const result: Override[] = [];
-  for (const [key, spec] of Object.entries(obj)) {
+  for (const [child, spec] of Object.entries(obj)) {
+    const key = parentKey === "" ? child : `${parentKey}>${child}`;
     if (typeof spec === "string") {
       result.push({ key, spec, source });
+    } else if (isObject(spec)) {
+      // npm's nested object form `{ parent: { child: spec } }` means the same
+      // as pnpm's `"parent>child": spec`, so it is flattened onto that key and
+      // reported under the same nested-key skip instead of vanishing.
+      result.push(...collectOverridesFromMap(spec, source, key));
     }
   }
   return result;

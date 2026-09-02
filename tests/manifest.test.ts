@@ -64,6 +64,25 @@ describe("parsePackageJsonOverrides", () => {
     ]);
   });
 
+  it("flattens npm-style nested object overrides into parent>child keys", () => {
+    const content = JSON.stringify({
+      overrides: {
+        foo: {
+          bar: ">=1.0.0",
+          baz: { qux: ">=2.0.0" },
+        },
+      },
+    });
+    expect(parsePackageJsonOverrides(content)).toEqual([
+      { key: "foo>bar", spec: ">=1.0.0", source: "package.json:overrides" },
+      {
+        key: "foo>baz>qux",
+        spec: ">=2.0.0",
+        source: "package.json:overrides",
+      },
+    ]);
+  });
+
   it("returns empty array when root is not an object", () => {
     expect(parsePackageJsonOverrides("[1,2,3]")).toEqual([]);
   });
