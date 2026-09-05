@@ -16,8 +16,8 @@ importers:
         version: 2.9.0
     devDependencies:
       '@types/bun':
-        specifier: 1.4.0
-        version: 1.4.0
+        specifier: 1.4.1
+        version: 1.4.1
       '@types/node':
         specifier: 24.13.3
         version: 24.13.3
@@ -30,8 +30,8 @@ importers:
 
 packages:
 
-  '@types/bun@1.4.0':
-    resolution: {integrity: sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ==}
+  '@types/bun@1.4.1':
+    resolution: {integrity: sha512-0AVGiTXGajf1rgKom3N+c5L7CBxuoyyv1i44M0nX4UDK0G/fnRAMiri93nHuVPIb429KKtAgj7HatVmmOjeQLA==}
 
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
@@ -159,8 +159,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  bun-types@1.4.0:
-    resolution: {integrity: sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q==}
+  bun-types@1.4.1:
+    resolution: {integrity: sha512-loKuVrAFZKfEv+JvWkHRS9GW5IqLuLRjVXN9p+vZvBN86O5hf/pBZQ5hSoyipsrMmWObZBDvWnlmKvjKTM0PdA==}
 
   semver@7.8.5:
     resolution: {integrity: sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==}
@@ -182,9 +182,9 @@ packages:
 
 snapshots:
 
-  '@types/bun@1.4.0':
+  '@types/bun@1.4.1':
     dependencies:
-      bun-types: 1.4.0
+      bun-types: 1.4.1
 
   '@types/node@24.13.3':
     dependencies:
@@ -252,7 +252,7 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  bun-types@1.4.0:
+  bun-types@1.4.1:
     dependencies:
       '@types/node': 24.13.3
 
@@ -284,5 +284,3 @@ snapshots:
   undici-types@7.18.2: {}
 
   yaml@2.9.0: {}
-
-time: {}
