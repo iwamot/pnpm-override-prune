@@ -13,4 +13,8 @@ jobs:
       contents: read
     uses: iwamot/workflows/.github/workflows/compatibility-node.yml@03b94c328c99fb628465841debd7ba83ca9b517f # v8.10.1
     with:
-      node-versions: '["20","22","24"]'
+      # The floor is the oldest Node release upstream still supports, and
+      # `engines.node` in package.json carries the same number: that field is
+      # what promises the package installs there. Both move when a release
+      # leaves support.
+      node-versions: '["22","24"]'
