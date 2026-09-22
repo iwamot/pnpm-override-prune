@@ -2,6 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { RegistryTarget } from "./npmrc.ts";
 import {
   type PackageMetadata,
+  type PackumentForm,
   parsePackageMetadata,
   requestHeaders,
 } from "./registry.ts";
@@ -16,7 +17,7 @@ export type FetchOutcome =
 
 export interface RegistryClient {
   /** Never rejects; every failure is reported through the outcome. */
-  fetchPackage(name: string): Promise<FetchOutcome>;
+  fetchPackage(name: string, form?: PackumentForm): Promise<FetchOutcome>;
 }
 
 /** Picks the registry (and credentials) that serves a package name. */
@@ -34,9 +35,10 @@ function failed(name: string, cause: unknown, attempts: number): FetchOutcome {
 async function fetchWithRetry(
   name: string,
   target: RegistryTarget,
+  form: PackumentForm,
 ): Promise<FetchOutcome> {
   const url = `${target.baseUrl}/${encodePackageName(name)}`;
-  const headers = requestHeaders(target.authorization);
+  const headers = requestHeaders(target.authorization, form);
   for (let attempt = 1; ; attempt++) {
     let response: Response;
     try {
@@ -80,19 +82,23 @@ export function createNpmRegistryClient(
 ): RegistryClient {
   const cache = new Map<string, Promise<FetchOutcome>>();
   return {
-    fetchPackage(name: string): Promise<FetchOutcome> {
-      const cached = cache.get(name);
+    fetchPackage(
+      name: string,
+      form: PackumentForm = "abbreviated",
+    ): Promise<FetchOutcome> {
+      const key = `${form} ${name}`;
+      const cached = cache.get(key);
       if (cached !== undefined) {
         return cached;
       }
       const promise = (async (): Promise<FetchOutcome> => {
         try {
-          return await fetchWithRetry(name, registryFor(name));
+          return await fetchWithRetry(name, registryFor(name), form);
         } catch (cause) {
           return failed(name, cause, 1);
         }
       })();
-      cache.set(name, promise);
+      cache.set(key, promise);
       return promise;
     },
   };

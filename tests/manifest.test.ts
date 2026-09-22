@@ -4,7 +4,9 @@ import {
   MalformedManifestError,
   parsePackageJsonOverrides,
   parseWorkspaceOverrides,
+  parseWorkspaceReleaseAge,
 } from "../src/manifest.ts";
+import { DEFAULT_RELEASE_AGE_SETTINGS } from "../src/release-age.ts";
 
 describe("parsePackageJsonOverrides", () => {
   it("collects entries from pnpm.overrides", () => {
@@ -308,5 +310,49 @@ describe("buildWorkspaceDirectDeps", () => {
     expect(() =>
       buildWorkspaceDirectDeps(new Map([[".", "{not json"]])),
     ).toThrow(MalformedManifestError);
+  });
+});
+
+describe("parseWorkspaceReleaseAge", () => {
+  it("falls back to pnpm's default when the workspace file sets nothing", () => {
+    expect(parseWorkspaceReleaseAge("packages:\n  - apps/*\n")).toEqual(
+      DEFAULT_RELEASE_AGE_SETTINGS,
+    );
+    expect(parseWorkspaceReleaseAge("")).toEqual(DEFAULT_RELEASE_AGE_SETTINGS);
+  });
+
+  it("reads the minimum and an exclude list", () => {
+    const yaml = [
+      "minimumReleaseAge: 60",
+      "minimumReleaseAgeExclude:",
+      "  - webpack",
+      "  - '@myorg/*'",
+      "  - 7",
+    ].join("\n");
+    expect(parseWorkspaceReleaseAge(yaml)).toEqual({
+      minimumReleaseAge: 60,
+      minimumReleaseAgeExclude: ["webpack", "@myorg/*"],
+    });
+  });
+
+  it("accepts a single scalar as the exclude list", () => {
+    expect(
+      parseWorkspaceReleaseAge("minimumReleaseAgeExclude: webpack\n"),
+    ).toEqual({
+      minimumReleaseAge: 1440,
+      minimumReleaseAgeExclude: ["webpack"],
+    });
+  });
+
+  it("keeps the default when the minimum is not a number", () => {
+    expect(
+      parseWorkspaceReleaseAge("minimumReleaseAge: soon\n").minimumReleaseAge,
+    ).toBe(1440);
+  });
+
+  it("rejects unparseable yaml", () => {
+    expect(() => parseWorkspaceReleaseAge("overrides: [\n")).toThrow(
+      MalformedManifestError,
+    );
   });
 });

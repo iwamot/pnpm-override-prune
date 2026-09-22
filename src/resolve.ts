@@ -9,21 +9,26 @@ import { compare, maxSatisfying } from "semver";
  * versions get installed. Reporting the lowest means PRUNE only when *every*
  * consumer would land at or above the override floor.
  *
- * Returns null when there are no parent specs or no candidates. Specs that no
- * candidate satisfies are skipped (treated as inert constraints).
+ * `candidateVersions` are the versions the release-age policy admits;
+ * `fallbackVersions` are all published versions. A spec no candidate
+ * satisfies resolves from the fallback, as pnpm does outside strict mode.
+ *
+ * Returns null when there are no parent specs or no versions. Specs that no
+ * version satisfies are skipped (treated as inert constraints).
  */
 export function computeNaturalResolution(
   parentSpecs: readonly string[],
   candidateVersions: readonly string[],
+  fallbackVersions: readonly string[] = candidateVersions,
 ): string | null {
-  if (parentSpecs.length === 0 || candidateVersions.length === 0) {
+  if (parentSpecs.length === 0 || fallbackVersions.length === 0) {
     return null;
   }
   let lowest: string | null = null;
   for (const spec of parentSpecs) {
-    const max = maxSatisfying(candidateVersions, spec, {
-      includePrerelease: false,
-    });
+    const max =
+      maxSatisfying(candidateVersions, spec, { includePrerelease: false }) ??
+      maxSatisfying(fallbackVersions, spec, { includePrerelease: false });
     if (max === null) {
       continue;
     }

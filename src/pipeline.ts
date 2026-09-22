@@ -9,6 +9,7 @@ import {
 import { type Lockfile, parseSnapshotKey } from "./lockfile.ts";
 import type { Override, WorkspaceDirectDeps } from "./manifest.ts";
 import type { PackageMetadata } from "./registry.ts";
+import { eligibleVersions, type ReleasePolicy } from "./release-age.ts";
 import { computeNaturalResolution } from "./resolve.ts";
 
 export interface AuditEntry {
@@ -95,11 +96,18 @@ function protocolOf(spec: string): string {
   return colon === -1 ? spec : spec.slice(0, colon + 1);
 }
 
+/** The package an override pins, or null when the entry is skipped. */
+export function targetOf(override: Override): string | null {
+  const cat = categorize(override.key, override.spec);
+  return cat.kind === "target" ? cat.name : null;
+}
+
 export function evaluateOverride(
   override: Override,
   lockfile: Lockfile,
   workspaceDirectDeps: WorkspaceDirectDeps,
   registryData: RegistryData,
+  releasePolicy?: ReleasePolicy,
 ): Result {
   const cat = categorize(override.key, override.spec);
   if (cat.kind === "skip") {
@@ -153,8 +161,12 @@ export function evaluateOverride(
   if (targetMeta === undefined || targetMeta === null) {
     return { status: "error", value: "(registry miss)" };
   }
-  const candidates = Array.from(targetMeta.versions.keys());
-  const natural = computeNaturalResolution(specs, candidates);
+  const published = Array.from(targetMeta.versions.keys());
+  const candidates =
+    releasePolicy === undefined
+      ? published
+      : eligibleVersions(targetMeta, releasePolicy, cat.name);
+  const natural = computeNaturalResolution(specs, candidates, published);
   return classify(override.spec, natural);
 }
 

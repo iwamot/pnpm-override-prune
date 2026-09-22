@@ -82,4 +82,18 @@ describe("computeNaturalResolution", () => {
       computeNaturalResolution(["not-a-spec"], ["1.0.0", "2.0.0"]),
     ).toBeNull();
   });
+
+  it("falls back to all versions for a spec no candidate satisfies", () => {
+    const candidates = ["1.0.0", "1.1.0"];
+    const all = ["1.0.0", "1.1.0", "1.2.0", "2.0.0"];
+    expect(computeNaturalResolution(["^1.0.0"], candidates, all)).toBe("1.1.0");
+    expect(computeNaturalResolution(["^2.0.0"], candidates, all)).toBe("2.0.0");
+    expect(
+      computeNaturalResolution(["^1.0.0", "^2.0.0"], candidates, all),
+    ).toBe("1.1.0");
+  });
+
+  it("returns null with no versions at all", () => {
+    expect(computeNaturalResolution(["^1.0.0"], [], [])).toBeNull();
+  });
 });
