@@ -9,7 +9,11 @@ import {
 import { type Lockfile, parseSnapshotKey } from "./lockfile.ts";
 import type { Override, WorkspaceDirectDeps } from "./manifest.ts";
 import type { PackageMetadata } from "./registry.ts";
-import { eligibleVersions, type ReleasePolicy } from "./release-age.ts";
+import {
+  admittedPool,
+  publishedPool,
+  type ReleasePolicy,
+} from "./release-age.ts";
 import { computeNaturalResolution } from "./resolve.ts";
 
 export interface AuditEntry {
@@ -161,11 +165,11 @@ export function evaluateOverride(
   if (targetMeta === undefined || targetMeta === null) {
     return { status: "error", value: "(registry miss)" };
   }
-  const published = Array.from(targetMeta.versions.keys());
+  const published = publishedPool(targetMeta);
   const candidates =
     releasePolicy === undefined
       ? published
-      : eligibleVersions(targetMeta, releasePolicy, cat.name);
+      : admittedPool(targetMeta, releasePolicy, cat.name);
   const natural = computeNaturalResolution(specs, candidates, published);
   return classify(override.spec, natural);
 }

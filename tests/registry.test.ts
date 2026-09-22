@@ -52,6 +52,8 @@ describe("parsePackageMetadata", () => {
     const v = meta.versions.get("19.1.0");
     expect(v?.dependencies.get("scheduler")).toBe("^0.26.0");
     expect(v?.dependencies.get("react")).toBe("^19.1.0");
+    expect(v?.deprecated).toBe(false);
+    expect(meta.latest).toBe("19.1.0");
     expect(meta.modified).toEqual(new Date("2025-03-28T20:39:22.000Z"));
     expect(meta.publishedAt).toBeNull();
   });
@@ -73,6 +75,21 @@ describe("parsePackageMetadata", () => {
       new Map([["1.0.0", new Date("2020-01-01T00:00:00.000Z")]]),
     );
     expect(meta.modified).toBeNull();
+  });
+
+  it("flags deprecated versions and ignores a latest tag that names no version", () => {
+    const raw = {
+      "dist-tags": { latest: "9.9.9" },
+      versions: {
+        "1.0.0": { deprecated: "use 2.x" },
+        "2.0.0": {},
+      },
+    };
+    const meta = parsePackageMetadata(raw, "pkg");
+    expect(meta.versions.get("1.0.0")?.deprecated).toBe(true);
+    expect(meta.versions.get("2.0.0")?.deprecated).toBe(false);
+    expect(meta.latest).toBeNull();
+    expect(parsePackageMetadata({ versions: {} }, "pkg").latest).toBeNull();
   });
 
   it("reports no publish times when the time field is absent or malformed", () => {

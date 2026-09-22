@@ -1,11 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import type { PackageMetadata } from "../src/registry.ts";
 import {
+  admittedPool,
   createReleasePolicy,
   DEFAULT_RELEASE_AGE_SETTINGS,
   eligibleVersions,
   InvalidReleaseAgeExcludeError,
   needsPublishTimes,
+  publishedPool,
   type ReleasePolicy,
 } from "../src/release-age.ts";
 
@@ -24,14 +26,24 @@ function policy(
 
 function meta(args: {
   versions: readonly string[];
+  latest?: string;
+  deprecated?: readonly string[];
   modified?: string;
   publishedAt?: Record<string, string>;
 }): PackageMetadata {
   return {
     name: "pkg",
     versions: new Map(
-      args.versions.map((v) => [v, { version: v, dependencies: new Map() }]),
+      args.versions.map((v) => [
+        v,
+        {
+          version: v,
+          dependencies: new Map(),
+          deprecated: (args.deprecated ?? []).includes(v),
+        },
+      ]),
     ),
+    latest: args.latest ?? null,
     modified: args.modified === undefined ? null : new Date(args.modified),
     publishedAt:
       args.publishedAt === undefined
@@ -206,5 +218,106 @@ describe("needsPublishTimes", () => {
     expect(
       needsPublishTimes(meta({ versions: ["1.0.0"] }), policy(1440), "pkg"),
     ).toBe(true);
+  });
+});
+
+describe("publishedPool", () => {
+  it("carries every version, the latest tag, and deprecations", () => {
+    const m = meta({
+      versions: ["1.0.0", "1.1.0"],
+      latest: "1.1.0",
+      deprecated: ["1.0.0"],
+    });
+    expect(publishedPool(m)).toEqual({
+      versions: ["1.0.0", "1.1.0"],
+      latest: "1.1.0",
+      deprecated: new Set(["1.0.0"]),
+    });
+  });
+});
+
+describe("admittedPool", () => {
+  const times = {
+    "1.0.0": "2026-09-01T00:00:00Z",
+    "1.1.0": "2026-09-10T00:00:00Z",
+    "1.2.0": "2026-09-22T11:00:00Z",
+    "2.0.0-beta.1": "2026-09-22T11:30:00Z",
+  };
+
+  it("is the published pool when nothing is filtered", () => {
+    const m = meta({ versions: ["1.0.0"], latest: "1.0.0" });
+    expect(admittedPool(m, policy(1440), "pkg")).toEqual(publishedPool(m));
+  });
+
+  it("keeps the latest tag when its version is mature", () => {
+    const m = meta({
+      versions: Object.keys(times),
+      latest: "1.1.0",
+      publishedAt: times,
+    });
+    expect(admittedPool(m, policy(1440), "pkg")).toEqual({
+      versions: ["1.0.0", "1.1.0"],
+      latest: "1.1.0",
+      deprecated: new Set(),
+    });
+  });
+
+  it("moves latest back to the highest mature version below it", () => {
+    const m = meta({
+      versions: Object.keys(times),
+      latest: "1.2.0",
+      publishedAt: times,
+    });
+    expect(admittedPool(m, policy(1440), "pkg").latest).toBe("1.1.0");
+  });
+
+  it("prefers a non-deprecated version when moving latest", () => {
+    const m = meta({
+      versions: Object.keys(times),
+      latest: "1.2.0",
+      deprecated: ["1.1.0"],
+      publishedAt: times,
+    });
+    expect(admittedPool(m, policy(1440), "pkg").latest).toBe("1.0.0");
+  });
+
+  it("falls back to a deprecated version when only those remain", () => {
+    const m = meta({
+      versions: Object.keys(times),
+      latest: "1.2.0",
+      deprecated: ["1.0.0", "1.1.0"],
+      publishedAt: times,
+    });
+    expect(admittedPool(m, policy(1440), "pkg").latest).toBe("1.1.0");
+  });
+
+  it("keeps a prerelease latest on prereleases only", () => {
+    const m = meta({
+      versions: Object.keys(times),
+      latest: "2.0.0-beta.1",
+      publishedAt: times,
+    });
+    expect(admittedPool(m, policy(1440), "pkg").latest).toBeNull();
+  });
+
+  it("drops latest when no mature version is at or below it", () => {
+    const m = meta({
+      versions: ["1.2.0", "1.3.0"],
+      latest: "1.2.0",
+      publishedAt: {
+        "1.2.0": "2026-09-22T11:00:00Z",
+        "1.3.0": "2026-09-01T00:00:00Z",
+      },
+    });
+    expect(admittedPool(m, policy(1440), "pkg")).toEqual({
+      versions: ["1.3.0"],
+      latest: null,
+      deprecated: new Set(),
+    });
+  });
+
+  it("has no latest when the registry reports none", () => {
+    const m = meta({ versions: Object.keys(times), publishedAt: times });
+    expect(admittedPool(m, policy(1440), "pkg").latest).toBeNull();
   });
 });

@@ -12,7 +12,7 @@ import {
   gatherSpecsForTarget,
   targetOf,
 } from "../src/pipeline.ts";
-import type { PackageMetadata } from "../src/registry.ts";
+import type { PackageMetadata, PackageVersionMeta } from "../src/registry.ts";
 import { createReleasePolicy } from "../src/release-age.ts";
 
 function makeLockfile(args: {
@@ -55,19 +55,18 @@ function makeMetadata(
   versions: Record<string, Record<string, string>>,
   publishedAt: Record<string, string> | null = null,
 ): PackageMetadata {
-  const map = new Map<
-    string,
-    { version: string; dependencies: ReadonlyMap<string, string> }
-  >();
+  const map = new Map<string, PackageVersionMeta>();
   for (const [version, deps] of Object.entries(versions)) {
     map.set(version, {
       version,
       dependencies: new Map(Object.entries(deps)),
+      deprecated: false,
     });
   }
   return {
     name,
     versions: map,
+    latest: null,
     modified: null,
     publishedAt:
       publishedAt === null

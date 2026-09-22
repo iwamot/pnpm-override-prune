@@ -2,11 +2,14 @@ export interface PackageVersionMeta {
   readonly version: string;
   /** Merged map of dependencies + peerDependencies + optionalDependencies. */
   readonly dependencies: ReadonlyMap<string, string>;
+  readonly deprecated: boolean;
 }
 
 export interface PackageMetadata {
   readonly name: string;
   readonly versions: ReadonlyMap<string, PackageVersionMeta>;
+  /** The `latest` dist-tag when it names a published version. */
+  readonly latest: string | null;
   /** When the registry last changed the package; null when not reported. */
   readonly modified: Date | null;
   /**
@@ -127,11 +130,18 @@ export function parsePackageMetadata(
     versions.set(version, {
       version,
       dependencies: mergeDepFields(versionData),
+      deprecated: versionData.deprecated != null,
     });
   }
+  const distTags = raw["dist-tags"];
+  const latestTag = isObject(distTags) ? distTags.latest : undefined;
   return {
     name,
     versions,
+    latest:
+      typeof latestTag === "string" && versions.has(latestTag)
+        ? latestTag
+        : null,
     modified: parseDate(raw.modified),
     publishedAt: parsePublishTimes(raw.time, versions),
   };
