@@ -1,3 +1,4 @@
+import type { RegistryTarget } from "./npmrc.ts";
 import { type PackageMetadata, parsePackageMetadata } from "./registry.ts";
 
 export type FetchOutcome =
@@ -12,9 +13,8 @@ export interface RegistryClient {
   fetchPackage(name: string): Promise<FetchOutcome>;
 }
 
-export interface RegistryClientOptions {
-  readonly baseUrl?: string;
-}
+/** Picks the registry (and credentials) that serves a package name. */
+export type RegistryResolver = (name: string) => RegistryTarget;
 
 function encodePackageName(name: string): string {
   return name.split("/").map(encodeURIComponent).join("/");
@@ -29,9 +29,8 @@ function failed(name: string, cause: unknown): FetchOutcome {
 }
 
 export function createNpmRegistryClient(
-  options: RegistryClientOptions = {},
+  registryFor: RegistryResolver,
 ): RegistryClient {
-  const baseUrl = options.baseUrl ?? "https://registry.npmjs.org";
   const cache = new Map<string, Promise<FetchOutcome>>();
   return {
     fetchPackage(name: string): Promise<FetchOutcome> {
@@ -40,9 +39,14 @@ export function createNpmRegistryClient(
         return cached;
       }
       const promise = (async (): Promise<FetchOutcome> => {
-        const url = `${baseUrl}/${encodePackageName(name)}`;
         try {
-          const response = await fetch(url);
+          const target = registryFor(name);
+          const url = `${target.baseUrl}/${encodePackageName(name)}`;
+          const headers: Record<string, string> = {};
+          if (target.authorization !== null) {
+            headers.authorization = target.authorization;
+          }
+          const response = await fetch(url, { headers });
           if (response.status === 404) {
             return { kind: "missing" };
           }
