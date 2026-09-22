@@ -1,4 +1,8 @@
 import { parse as parseYaml } from "yaml";
+import {
+  DEFAULT_RELEASE_AGE_SETTINGS,
+  type ReleaseAgeSettings,
+} from "./release-age.ts";
 
 export type WorkspaceFilename = "pnpm-workspace.yaml" | "aube-workspace.yaml";
 export type PackageJsonContainer =
@@ -156,18 +160,48 @@ export function buildWorkspaceDirectDeps(
   return map;
 }
 
-export function parseWorkspaceOverrides(
-  content: string,
-  source: WorkspaceFilename,
-): readonly Override[] {
-  let parsed: unknown;
+function parseWorkspaceYaml(content: string): unknown {
   try {
-    parsed = parseYaml(content);
+    return parseYaml(content);
   } catch (e) {
     throw new MalformedManifestError(
       e instanceof Error ? e.message : "yaml parse error",
     );
   }
+}
+
+/**
+ * pnpm reads `minimumReleaseAge` from the workspace file (not `.npmrc`).
+ * A missing setting means pnpm's own default. The exclude list may be
+ * written as a single scalar, which pnpm also accepts.
+ */
+export function parseWorkspaceReleaseAge(content: string): ReleaseAgeSettings {
+  const parsed = parseWorkspaceYaml(content);
+  if (!isObject(parsed)) {
+    return DEFAULT_RELEASE_AGE_SETTINGS;
+  }
+  const age = parsed.minimumReleaseAge;
+  const excludeRaw = parsed.minimumReleaseAgeExclude;
+  const exclude =
+    typeof excludeRaw === "string"
+      ? [excludeRaw]
+      : Array.isArray(excludeRaw)
+        ? excludeRaw.filter((x): x is string => typeof x === "string")
+        : [];
+  return {
+    minimumReleaseAge:
+      typeof age === "number"
+        ? age
+        : DEFAULT_RELEASE_AGE_SETTINGS.minimumReleaseAge,
+    minimumReleaseAgeExclude: exclude,
+  };
+}
+
+export function parseWorkspaceOverrides(
+  content: string,
+  source: WorkspaceFilename,
+): readonly Override[] {
+  const parsed = parseWorkspaceYaml(content);
   if (!isObject(parsed)) {
     return [];
   }

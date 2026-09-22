@@ -17,6 +17,7 @@ import {
   type PackageJsonContainer,
   parsePackageJsonOverrides,
   parseWorkspaceOverrides,
+  parseWorkspaceReleaseAge,
   type WorkspaceDirectDeps,
   type WorkspaceFilename,
 } from "./manifest.ts";
@@ -31,9 +32,19 @@ import {
   collectNeededRegistryPackages,
   collectPackagesForOverride,
   evaluateOverride,
+  targetOf,
 } from "./pipeline.ts";
 import type { PackageMetadata } from "./registry.ts";
-import { createNpmRegistryClient } from "./registry-fetch.ts";
+import {
+  createNpmRegistryClient,
+  type FetchOutcome,
+} from "./registry-fetch.ts";
+import {
+  createReleasePolicy,
+  DEFAULT_RELEASE_AGE_SETTINGS,
+  needsPublishTimes,
+  type ReleasePolicy,
+} from "./release-age.ts";
 import { removeFromPackageJson, removeFromWorkspaceYaml } from "./rewrite.ts";
 
 const WORKSPACE_FILENAMES: readonly WorkspaceFilename[] = [
@@ -162,6 +173,7 @@ export async function runAudit(
   let lockfile: Lockfile;
   let workspaceDirectDeps: WorkspaceDirectDeps;
   let registryConfig: RegistryConfig;
+  let releasePolicy: ReleasePolicy;
   try {
     const fromPackage = parsePackageJsonOverrides(packageJsonContent);
     const fromWorkspace =
@@ -178,6 +190,12 @@ export async function runAudit(
       lockfile.importerPaths,
     );
     registryConfig = await readRegistryConfig(dir);
+    releasePolicy = createReleasePolicy(
+      workspace === null
+        ? DEFAULT_RELEASE_AGE_SETTINGS
+        : parseWorkspaceReleaseAge(workspace.content),
+      new Date(),
+    );
   } catch (e) {
     emitError(e instanceof Error ? e.message : "parse error");
     return 2;
@@ -190,8 +208,28 @@ export async function runAudit(
   const client = createNpmRegistryClient((name) =>
     registryFor(name, registryConfig),
   );
+  const targets = new Set<string>();
+  for (const override of allOverrides) {
+    const target = targetOf(override);
+    if (target !== null) {
+      targets.add(target);
+    }
+  }
+  // Override targets are the packages whose versions get dated by the
+  // release-age policy, so they alone may need the full packument.
+  const metadataFor = async (name: string): Promise<FetchOutcome> => {
+    const outcome = await client.fetchPackage(name);
+    if (
+      outcome.kind === "found" &&
+      targets.has(name) &&
+      needsPublishTimes(outcome.metadata, releasePolicy, name)
+    ) {
+      return client.fetchPackage(name, "full");
+    }
+    return outcome;
+  };
   for (const name of collectNeededRegistryPackages(allOverrides, lockfile)) {
-    void client.fetchPackage(name).then((outcome) => {
+    void metadataFor(name).then((outcome) => {
       if (outcome.kind === "failed") {
         emitError(outcome.message);
       }
@@ -213,7 +251,7 @@ export async function runAudit(
       const fetched = await Promise.all(
         collectPackagesForOverride(override, lockfile).map(async (name) => ({
           name,
-          outcome: await client.fetchPackage(name),
+          outcome: await metadataFor(name),
         })),
       );
       const dataMap = new Map<string, PackageMetadata | null>();
@@ -229,6 +267,7 @@ export async function runAudit(
         lockfile,
         workspaceDirectDeps,
         dataMap,
+        releasePolicy,
       );
       const entry: AuditEntry = { override, result };
       collectedEntries.push(entry);

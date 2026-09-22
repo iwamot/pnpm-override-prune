@@ -10,8 +10,10 @@ import {
   collectPackagesForOverride,
   evaluateOverride,
   gatherSpecsForTarget,
+  targetOf,
 } from "../src/pipeline.ts";
 import type { PackageMetadata } from "../src/registry.ts";
+import { createReleasePolicy } from "../src/release-age.ts";
 
 function makeLockfile(args: {
   transitive?: Record<string, Array<{ parent: string; resolved: string }>>;
@@ -51,6 +53,7 @@ const NO_DIRECT: WorkspaceDirectDeps = new Map();
 function makeMetadata(
   name: string,
   versions: Record<string, Record<string, string>>,
+  publishedAt: Record<string, string> | null = null,
 ): PackageMetadata {
   const map = new Map<
     string,
@@ -62,7 +65,17 @@ function makeMetadata(
       dependencies: new Map(Object.entries(deps)),
     });
   }
-  return { name, versions: map };
+  return {
+    name,
+    versions: map,
+    modified: null,
+    publishedAt:
+      publishedAt === null
+        ? null
+        : new Map(
+            Object.entries(publishedAt).map(([v, t]) => [v, new Date(t)]),
+          ),
+  };
 }
 
 const PKG_OVERRIDE = (key: string, spec: string): Override => ({
@@ -749,5 +762,61 @@ describe("collectNeededRegistryPackages", () => {
     expect(collectNeededRegistryPackages(overrides, makeLockfile({}))).toEqual([
       "foo",
     ]);
+  });
+});
+
+describe("evaluateOverride with a release-age policy", () => {
+  const now = new Date("2026-09-22T12:00:00Z");
+  const registry = new Map<string, PackageMetadata>([
+    [
+      "foo",
+      makeMetadata(
+        "foo",
+        { "1.0.0": {}, "1.1.0": {} },
+        {
+          "1.0.0": "2026-09-01T00:00:00Z",
+          "1.1.0": "2026-09-22T11:00:00Z",
+        },
+      ),
+    ],
+  ]);
+
+  it("keeps an override whose floor is a version too young to resolve", () => {
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=1.1.0"),
+      makeLockfile({}),
+      makeWorkspaceDirectDeps({ foo: "^1.0.0" }),
+      registry,
+      createReleasePolicy(
+        { minimumReleaseAge: 1440, minimumReleaseAgeExclude: [] },
+        now,
+      ),
+    );
+    expect(result).toEqual({ status: "keep", value: "1.0.0" });
+  });
+
+  it("prunes the same override once the check is off", () => {
+    const result = evaluateOverride(
+      PKG_OVERRIDE("foo", ">=1.1.0"),
+      makeLockfile({}),
+      makeWorkspaceDirectDeps({ foo: "^1.0.0" }),
+      registry,
+      createReleasePolicy(
+        { minimumReleaseAge: 0, minimumReleaseAgeExclude: [] },
+        now,
+      ),
+    );
+    expect(result).toEqual({ status: "prune", value: "1.1.0" });
+  });
+});
+
+describe("targetOf", () => {
+  it("names the package an override pins", () => {
+    expect(targetOf(PKG_OVERRIDE("foo", ">=1.0.0"))).toBe("foo");
+    expect(targetOf(PKG_OVERRIDE("foo@<1.0.0", ">=1.0.0"))).toBe("foo");
+  });
+
+  it("is null for an entry the audit skips", () => {
+    expect(targetOf(PKG_OVERRIDE("parent>child", "1.2.3"))).toBeNull();
   });
 });

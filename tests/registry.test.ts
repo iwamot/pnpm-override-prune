@@ -16,8 +16,14 @@ describe("requestHeaders", () => {
 
   it("adds the authorization header when credentials are configured", () => {
     expect(requestHeaders("Bearer tok")).toEqual({
-      accept: PACKUMENT_ACCEPT,
+      accept: PACKUMENT_ACCEPT.abbreviated,
       authorization: "Bearer tok",
+    });
+  });
+
+  it("asks for plain JSON when the full packument is wanted", () => {
+    expect(requestHeaders(null, "full")).toEqual({
+      accept: "application/json",
     });
   });
 });
@@ -46,6 +52,36 @@ describe("parsePackageMetadata", () => {
     const v = meta.versions.get("19.1.0");
     expect(v?.dependencies.get("scheduler")).toBe("^0.26.0");
     expect(v?.dependencies.get("react")).toBe("^19.1.0");
+    expect(meta.modified).toEqual(new Date("2025-03-28T20:39:22.000Z"));
+    expect(meta.publishedAt).toBeNull();
+  });
+
+  it("reads publish times from the full packument's time field", () => {
+    const raw = {
+      name: "pkg",
+      time: {
+        created: "2020-01-01T00:00:00.000Z",
+        modified: "2026-09-22T00:56:58.317Z",
+        "1.0.0": "2020-01-01T00:00:00.000Z",
+        "1.1.0": "not a date",
+        "9.9.9": "2026-01-01T00:00:00.000Z",
+      },
+      versions: { "1.0.0": {}, "1.1.0": {}, "1.2.0": {} },
+    };
+    const meta = parsePackageMetadata(raw, "pkg");
+    expect(meta.publishedAt).toEqual(
+      new Map([["1.0.0", new Date("2020-01-01T00:00:00.000Z")]]),
+    );
+    expect(meta.modified).toBeNull();
+  });
+
+  it("reports no publish times when the time field is absent or malformed", () => {
+    expect(
+      parsePackageMetadata({ versions: {}, time: "soon" }, "pkg").publishedAt,
+    ).toBeNull();
+    expect(
+      parsePackageMetadata({ versions: {}, modified: 12 }, "pkg").modified,
+    ).toBeNull();
   });
 
   it("collects dependencies for each published version", () => {
