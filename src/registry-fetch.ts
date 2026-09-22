@@ -1,9 +1,11 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import type { RegistryTarget } from "./npmrc.ts";
 import {
   type PackageMetadata,
   parsePackageMetadata,
   requestHeaders,
 } from "./registry.ts";
+import { failureMessage, REQUEST_TIMEOUT_MS, retryDelay } from "./retry.ts";
 
 export type FetchOutcome =
   | { readonly kind: "found"; readonly metadata: PackageMetadata }
@@ -24,12 +26,53 @@ function encodePackageName(name: string): string {
   return name.split("/").map(encodeURIComponent).join("/");
 }
 
-function failed(name: string, cause: unknown): FetchOutcome {
+function failed(name: string, cause: unknown, attempts: number): FetchOutcome {
   const detail = cause instanceof Error ? cause.message : String(cause);
-  return {
-    kind: "failed",
-    message: `failed to fetch '${name}' from registry: ${detail}`,
-  };
+  return { kind: "failed", message: failureMessage(name, detail, attempts) };
+}
+
+async function fetchWithRetry(
+  name: string,
+  target: RegistryTarget,
+): Promise<FetchOutcome> {
+  const url = `${target.baseUrl}/${encodePackageName(name)}`;
+  const headers = requestHeaders(target.authorization);
+  for (let attempt = 1; ; attempt++) {
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (cause) {
+      const delay = retryDelay({ kind: "thrown" }, attempt);
+      if (delay === null) {
+        return failed(name, cause, attempt);
+      }
+      await sleep(delay);
+      continue;
+    }
+    if (response.status === 404) {
+      return { kind: "missing" };
+    }
+    if (!response.ok) {
+      const delay = retryDelay(
+        { kind: "status", status: response.status },
+        attempt,
+      );
+      if (delay === null) {
+        return failed(name, `HTTP ${response.status}`, attempt);
+      }
+      await sleep(delay);
+      continue;
+    }
+    try {
+      const raw: unknown = await response.json();
+      return { kind: "found", metadata: parsePackageMetadata(raw, name) };
+    } catch (cause) {
+      return failed(name, cause, attempt);
+    }
+  }
 }
 
 export function createNpmRegistryClient(
@@ -44,21 +87,9 @@ export function createNpmRegistryClient(
       }
       const promise = (async (): Promise<FetchOutcome> => {
         try {
-          const target = registryFor(name);
-          const url = `${target.baseUrl}/${encodePackageName(name)}`;
-          const response = await fetch(url, {
-            headers: requestHeaders(target.authorization),
-          });
-          if (response.status === 404) {
-            return { kind: "missing" };
-          }
-          if (!response.ok) {
-            return failed(name, `HTTP ${response.status}`);
-          }
-          const raw: unknown = await response.json();
-          return { kind: "found", metadata: parsePackageMetadata(raw, name) };
+          return await fetchWithRetry(name, registryFor(name));
         } catch (cause) {
-          return failed(name, cause);
+          return failed(name, cause, 1);
         }
       })();
       cache.set(name, promise);
