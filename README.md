@@ -51,7 +51,7 @@ Once they do, the entry is no longer doing anything — but it's easy to forget 
 For each override target, the tool gathers the specs that constrain it without the override applied:
 
 - direct importer specs read from each workspace `package.json` (the lockfile's importer specifiers are skipped because pnpm rewrites them to the override value)
-- parent-package metadata fetched from the npm registry for transitive parents (see [Registry configuration](#registry-configuration))
+- parent-package metadata fetched from the npm registry for transitive parents (see [Registry configuration](#registry-configuration)); the tool asks for the abbreviated form, which carries the dependency fields without readmes and other per-version metadata
 
 For each spec it computes the highest published version that spec would resolve to on its own. The reported version is the **lowest** of those — the worst case some consumer would land on if the override were removed. If that version already meets the override's lower bound, the entry is `[PRUNE]`; otherwise `[KEEP]`.
 

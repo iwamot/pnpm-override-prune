@@ -16,6 +16,25 @@ export class MalformedRegistryResponseError extends Error {
   }
 }
 
+/**
+ * Asks for the abbreviated packument, which carries the per-version
+ * dependency fields this tool reads without readmes and other metadata.
+ * The fallbacks keep a registry that only serves the full document from
+ * refusing the request.
+ */
+export const PACKUMENT_ACCEPT =
+  "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*";
+
+export function requestHeaders(
+  authorization: string | null,
+): Record<string, string> {
+  const headers: Record<string, string> = { accept: PACKUMENT_ACCEPT };
+  if (authorization !== null) {
+    headers.authorization = authorization;
+  }
+  return headers;
+}
+
 const DEP_FIELDS = [
   "dependencies",
   "peerDependencies",

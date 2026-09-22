@@ -1,10 +1,53 @@
 import { describe, expect, it } from "bun:test";
 import {
   MalformedRegistryResponseError,
+  PACKUMENT_ACCEPT,
   parsePackageMetadata,
+  requestHeaders,
 } from "../src/registry.ts";
 
+describe("requestHeaders", () => {
+  it("asks for the abbreviated packument with full-document fallbacks", () => {
+    expect(requestHeaders(null)).toEqual({
+      accept:
+        "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*",
+    });
+  });
+
+  it("adds the authorization header when credentials are configured", () => {
+    expect(requestHeaders("Bearer tok")).toEqual({
+      accept: PACKUMENT_ACCEPT,
+      authorization: "Bearer tok",
+    });
+  });
+});
+
 describe("parsePackageMetadata", () => {
+  it("reads an abbreviated packument, which has no readme or time fields", () => {
+    // Shape served for Accept: application/vnd.npm.install-v1+json.
+    const raw = {
+      name: "react-dom",
+      "dist-tags": { latest: "19.1.0" },
+      modified: "2025-03-28T20:39:22.000Z",
+      versions: {
+        "19.1.0": {
+          name: "react-dom",
+          version: "19.1.0",
+          dependencies: { scheduler: "^0.26.0" },
+          peerDependencies: { react: "^19.1.0" },
+          dist: {
+            tarball:
+              "https://registry.npmjs.org/react-dom/-/react-dom-19.1.0.tgz",
+          },
+        },
+      },
+    };
+    const meta = parsePackageMetadata(raw, "react-dom");
+    const v = meta.versions.get("19.1.0");
+    expect(v?.dependencies.get("scheduler")).toBe("^0.26.0");
+    expect(v?.dependencies.get("react")).toBe("^19.1.0");
+  });
+
   it("collects dependencies for each published version", () => {
     const raw = {
       name: "speech-rule-engine",
