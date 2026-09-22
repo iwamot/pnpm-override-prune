@@ -1,5 +1,9 @@
 import type { RegistryTarget } from "./npmrc.ts";
-import { type PackageMetadata, parsePackageMetadata } from "./registry.ts";
+import {
+  type PackageMetadata,
+  parsePackageMetadata,
+  requestHeaders,
+} from "./registry.ts";
 
 export type FetchOutcome =
   | { readonly kind: "found"; readonly metadata: PackageMetadata }
@@ -42,11 +46,9 @@ export function createNpmRegistryClient(
         try {
           const target = registryFor(name);
           const url = `${target.baseUrl}/${encodePackageName(name)}`;
-          const headers: Record<string, string> = {};
-          if (target.authorization !== null) {
-            headers.authorization = target.authorization;
-          }
-          const response = await fetch(url, { headers });
+          const response = await fetch(url, {
+            headers: requestHeaders(target.authorization),
+          });
           if (response.status === 404) {
             return { kind: "missing" };
           }
