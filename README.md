@@ -51,7 +51,7 @@ Once they do, the entry is no longer doing anything — but it's easy to forget 
 For each override target, the tool gathers the specs that constrain it without the override applied:
 
 - direct importer specs read from each workspace `package.json` (the lockfile's importer specifiers are skipped because pnpm rewrites them to the override value)
-- parent-package metadata fetched from `https://registry.npmjs.org` for transitive parents
+- parent-package metadata fetched from the npm registry for transitive parents (see [Registry configuration](#registry-configuration))
 
 For each spec it computes the highest published version that spec would resolve to on its own. The reported version is the **lowest** of those — the worst case some consumer would land on if the override were removed. If that version already meets the override's lower bound, the entry is `[PRUNE]`; otherwise `[KEEP]`.
 
@@ -68,6 +68,17 @@ For each spec it computes the highest published version that spec would resolve 
 - Versioned keys like `"glob-parent@<5.1.2": ">=5.1.2"` (the form `pnpm audit --fix` typically emits) are evaluated. The selector is matched against each parent's requested spec via [`semver.intersects`](https://github.com/npm/node-semver#ranges-1) — the rule pnpm itself uses since [pnpm/pnpm#6904](https://github.com/pnpm/pnpm/pull/6904).
 - Lockfile must be `pnpm-lock.yaml` or `aube-lock.yaml` at `lockfileVersion: '9.0'` (pnpm 9+ / aube). Older formats are not supported in this release.
 
+## Registry configuration
+
+The registry is resolved the way npm and pnpm resolve it, so a project that already installs from a private registry needs no extra setup:
+
+1. the `npm_config_registry` environment variable
+2. `registry=` in the project's `.npmrc` (next to the audited `package.json`)
+3. `registry=` in the user's `.npmrc` (`~/.npmrc`, or the file named by `NPM_CONFIG_USERCONFIG`, which is what `actions/setup-node` sets)
+4. `https://registry.npmjs.org`
+
+Scoped registries (`@myorg:registry=https://npm.example.com/`) take precedence for packages in that scope. Credentials are read from the same files: `//npm.example.com/:_authToken=...` is sent as a bearer token and `//npm.example.com/:_auth=...` as basic credentials, matched against the longest path prefix of the registry URL, as npm does. `${VAR}` in a value is expanded from the environment, and a variable that isn't set is an error.
+
 ## Known limitations
 
 - Skips values using non-semver protocols (`catalog:`, `workspace:`, `file:`, `link:`, `portal:`, `npm:`, `github:`, `git`-prefixed, `http:` / `https:`).
@@ -75,8 +86,8 @@ For each spec it computes the highest published version that spec would resolve 
 - Skips nested-key overrides like `"parent>child": "1.2.3"`, including npm's object form `"parent": { "child": "1.2.3" }` (reported as `parent>child`). Only flat `name &rarr; spec` mappings are evaluated.
 - Skips versioned keys whose selector isn't a parseable semver range (e.g., `"foo@latest": ">=1.0.0"`). pnpm itself falls back to literal-string matching for such selectors, so they're rarely effective; verdict is left for human review.
 - Each override entry is evaluated independently. When multiple entries target the same package (e.g., several `lodash@...` rows from cumulative `pnpm audit --fix` runs), the tool won't propose consolidating them into a single stronger entry — it only marks each one prunable when its own selector/spec combination is a no-op against the natural resolution.
-- Public npm registry only. Private registries and `.npmrc` scoped registry configuration are not consulted.
-- Parents that the public registry doesn't know (HTTP 404) — e.g. workspace-internal packages resolved as transitive parents — are silently dropped from the constraint set. The natural resolution may then appear less constrained than it actually is. Any other fetch failure (network error, non-404 status, malformed metadata) marks the entry `[ERROR] (fetch failed: <package>)` instead of judging it, so a flaky connection can't make an override look unused.
+- Only `registry`, `@scope:registry`, `_authToken`, and `_auth` are read from `.npmrc`. Proxy and TLS settings (`https-proxy`, `cafile`, `strict-ssl`) are not; use Node's own environment (`NODE_EXTRA_CA_CERTS`, `NODE_USE_ENV_PROXY`) for those.
+- Parents that the registry doesn't know (HTTP 404) — e.g. workspace-internal packages resolved as transitive parents — are silently dropped from the constraint set. The natural resolution may then appear less constrained than it actually is. Any other fetch failure (network error, non-404 status, malformed metadata) marks the entry `[ERROR] (fetch failed: <package>)` instead of judging it, so a flaky connection can't make an override look unused.
 
 ## License
 

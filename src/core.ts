@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import {
@@ -19,6 +20,12 @@ import {
   type WorkspaceDirectDeps,
   type WorkspaceFilename,
 } from "./manifest.ts";
+import {
+  buildRegistryConfig,
+  type RegistryConfig,
+  registryFor,
+  userNpmrcPath,
+} from "./npmrc.ts";
 import {
   type AuditEntry,
   collectNeededRegistryPackages,
@@ -89,6 +96,15 @@ function workspaceFilenameFromPath(path: string): WorkspaceFilename {
     : "pnpm-workspace.yaml";
 }
 
+async function readRegistryConfig(dir: string): Promise<RegistryConfig> {
+  const env = process.env;
+  const [projectNpmrc, userNpmrc] = await Promise.all([
+    readFileIfExists(join(dir, ".npmrc")),
+    readFileIfExists(userNpmrcPath(env, homedir())),
+  ]);
+  return buildRegistryConfig({ env, projectNpmrc, userNpmrc });
+}
+
 function emitError(message: string): void {
   process.stderr.write(`error: ${message}\n`);
 }
@@ -145,6 +161,7 @@ export async function runAudit(
   let allOverrides: readonly Override[];
   let lockfile: Lockfile;
   let workspaceDirectDeps: WorkspaceDirectDeps;
+  let registryConfig: RegistryConfig;
   try {
     const fromPackage = parsePackageJsonOverrides(packageJsonContent);
     const fromWorkspace =
@@ -160,6 +177,7 @@ export async function runAudit(
       dir,
       lockfile.importerPaths,
     );
+    registryConfig = await readRegistryConfig(dir);
   } catch (e) {
     emitError(e instanceof Error ? e.message : "parse error");
     return 2;
@@ -169,7 +187,9 @@ export async function runAudit(
   // promise, so output can stream in entry order and await only the
   // per-entry subset. A failed fetch is reported once here; the entries
   // that needed it are marked [ERROR] as they stream.
-  const client = createNpmRegistryClient();
+  const client = createNpmRegistryClient((name) =>
+    registryFor(name, registryConfig),
+  );
   for (const name of collectNeededRegistryPackages(allOverrides, lockfile)) {
     void client.fetchPackage(name).then((outcome) => {
       if (outcome.kind === "failed") {
