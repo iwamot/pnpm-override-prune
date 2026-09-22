@@ -4,8 +4,9 @@
  * unless `minimumReleaseAgeExclude` names the package or the exact version.
  */
 
-import { valid as validVersion } from "semver";
+import { compare, prerelease, valid as validVersion } from "semver";
 import type { PackageMetadata } from "./registry.ts";
+import type { VersionPool } from "./resolve.ts";
 
 export interface ReleaseAgeSettings {
   /** Minutes a version must have been published for. 0 disables the check. */
@@ -127,6 +128,71 @@ export function needsPublishTimes(
     return false;
   }
   return meta.modified === null || meta.modified > policy.cutoff;
+}
+
+/** Everything the registry publishes, as pnpm sees it without a policy. */
+export function publishedPool(meta: PackageMetadata): VersionPool {
+  const deprecated = new Set<string>();
+  for (const [version, versionMeta] of meta.versions) {
+    if (versionMeta.deprecated) {
+      deprecated.add(version);
+    }
+  }
+  return {
+    versions: Array.from(meta.versions.keys()),
+    latest: meta.latest,
+    deprecated,
+  };
+}
+
+function isPrerelease(version: string): boolean {
+  return prerelease(version) !== null;
+}
+
+/**
+ * Where the `latest` tag lands once the policy hides its version: the highest
+ * admitted version at or below it with the same prerelease-ness, preferring
+ * a non-deprecated one. Mirrors how pnpm repoints dist-tags when filtering
+ * a packument by publish date.
+ */
+function repointLatest(
+  pool: VersionPool,
+  admitted: readonly string[],
+): string | null {
+  const latest = pool.latest;
+  if (latest === null || admitted.includes(latest)) {
+    return latest;
+  }
+  const eligible = admitted.filter(
+    (v) => compare(v, latest) <= 0 && isPrerelease(v) === isPrerelease(latest),
+  );
+  const preferred = eligible.filter((v) => !pool.deprecated.has(v));
+  const choices = preferred.length > 0 ? preferred : eligible;
+  let best: string | null = null;
+  for (const v of choices) {
+    if (best === null || compare(v, best) > 0) {
+      best = v;
+    }
+  }
+  return best;
+}
+
+/** The versions the policy admits, as pnpm sees them after filtering. */
+export function admittedPool(
+  meta: PackageMetadata,
+  policy: ReleasePolicy,
+  name: string,
+): VersionPool {
+  const published = publishedPool(meta);
+  const versions = eligibleVersions(meta, policy, name);
+  if (versions.length === published.versions.length) {
+    return published;
+  }
+  return {
+    versions,
+    latest: repointLatest(published, versions),
+    deprecated: published.deprecated,
+  };
 }
 
 /**
