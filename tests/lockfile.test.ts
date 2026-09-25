@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  extractMainDocument,
   MalformedLockfileError,
   parseLockfile,
   parseResolvedVersion,
@@ -240,5 +241,59 @@ snapshots:
 `;
     const lf = parseLockfile(lockfile);
     expect(lf.transitiveParents.size).toBe(0);
+  });
+});
+
+const ENV_DOCUMENT = `---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    configDependencies: {}
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.0.0
+        version: 12.0.0
+
+packages:
+
+  pnpm@12.0.0:
+    resolution: {integrity: sha512-bar}
+
+snapshots:
+
+  pnpm@12.0.0: {}
+`;
+
+describe("extractMainDocument", () => {
+  it("returns a single-document lockfile unchanged", () => {
+    expect(extractMainDocument(VALID_LOCKFILE)).toBe(VALID_LOCKFILE);
+  });
+
+  it("returns the document after the env lockfile", () => {
+    const combined = `${ENV_DOCUMENT}---\n${VALID_LOCKFILE}`;
+    expect(extractMainDocument(combined)).toBe(VALID_LOCKFILE);
+  });
+
+  it("handles CRLF line endings", () => {
+    const combined = `${ENV_DOCUMENT}---\n${VALID_LOCKFILE}`.replace(
+      /\n/g,
+      "\r\n",
+    );
+    expect(extractMainDocument(combined)).toBe(VALID_LOCKFILE);
+  });
+
+  it("returns an empty string for an env-only lockfile", () => {
+    expect(extractMainDocument(ENV_DOCUMENT)).toBe("");
+  });
+});
+
+describe("parseLockfile with an env lockfile document", () => {
+  it("reads the dependency lockfile, not the env document", () => {
+    const lf = parseLockfile(`${ENV_DOCUMENT}---\n${VALID_LOCKFILE}`);
+    expect(lf.importerPaths).toEqual(["."]);
+    expect(lf.transitiveParents.has("pnpm")).toBe(false);
+    expect(lf.transitiveParents.has("@xmldom/xmldom")).toBe(true);
   });
 });
