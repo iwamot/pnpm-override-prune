@@ -114,10 +114,32 @@ function extractTransitiveParents(
   return map;
 }
 
+const YAML_DOCUMENT_START = "---\n";
+const YAML_DOCUMENT_SEPARATOR = "\n---\n";
+
+// When the project pins its package manager or uses configDependencies, pnpm
+// prepends an env lockfile document to pnpm-lock.yaml. The file then starts
+// with "---\n" and the dependency lockfile is the document after the next
+// separator. This mirrors pnpm's extractMainDocument.
+export function extractMainDocument(content: string): string {
+  const normalized = content.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith(YAML_DOCUMENT_START)) {
+    return normalized;
+  }
+  const sep = normalized.indexOf(
+    YAML_DOCUMENT_SEPARATOR,
+    YAML_DOCUMENT_START.length,
+  );
+  if (sep === -1) {
+    return "";
+  }
+  return normalized.slice(sep + YAML_DOCUMENT_SEPARATOR.length);
+}
+
 export function parseLockfile(content: string): Lockfile {
   let parsed: unknown;
   try {
-    parsed = parseYaml(content);
+    parsed = parseYaml(extractMainDocument(content));
   } catch (e) {
     throw new MalformedLockfileError(
       e instanceof Error ? e.message : "yaml parse error",
