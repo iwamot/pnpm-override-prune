@@ -14,7 +14,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.job }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: true
-    uses: iwamot/workflows/.github/workflows/compatibility-node.yml@d4650268026c4277d5dc6aee7ef90d4dd57935e4 # v8.13.0
+    uses: iwamot/workflows/.github/workflows/compatibility-node.yml@e5473d794269314bf1ef838dacfcc505c2cb239f # v8.14.0
     with:
       # The floor is the oldest Node release upstream still supports, and
       # `engines.node` in package.json carries the same number: that field is
