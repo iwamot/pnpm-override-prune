@@ -11,6 +11,9 @@ jobs:
   compatibility:
     permissions:
       contents: read
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.job }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: true
     uses: iwamot/workflows/.github/workflows/compatibility-node.yml@866cf6089ddb88af6b479a14a4a78910b472b5f6 # v8.11.0
     with:
       # The floor is the oldest Node release upstream still supports, and
