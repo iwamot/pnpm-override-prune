@@ -55,8 +55,8 @@ export type WorkspaceDirectDeps = ReadonlyMap<string, readonly DirectDep[]>;
 
 export class MalformedManifestError extends Error {
   override readonly name = "MalformedManifestError";
-  constructor(message: string) {
-    super(`malformed manifest: ${message}`);
+  constructor(message: string, options?: ErrorOptions) {
+    super(`malformed manifest: ${message}`, options);
   }
 }
 
@@ -107,6 +107,7 @@ export function parsePackageJsonOverrides(
   } catch (e) {
     throw new MalformedManifestError(
       e instanceof Error ? e.message : "json parse error",
+      { cause: e },
     );
   }
   if (!isObject(parsed)) {
@@ -133,6 +134,7 @@ export function buildWorkspaceDirectDeps(
     } catch (e) {
       throw new MalformedManifestError(
         e instanceof Error ? e.message : "json parse error",
+        { cause: e },
       );
     }
     if (!isObject(parsed)) {
@@ -166,6 +168,7 @@ function parseWorkspaceYaml(content: string): unknown {
   } catch (e) {
     throw new MalformedManifestError(
       e instanceof Error ? e.message : "yaml parse error",
+      { cause: e },
     );
   }
 }

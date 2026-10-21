@@ -127,9 +127,7 @@ function stripTrailingSlash(url: string): string {
 }
 
 function assertRegistryUrl(value: string): void {
-  try {
-    new URL(value);
-  } catch {
+  if (!URL.canParse(value)) {
     throw new NpmrcConfigError(`invalid registry url: ${value}`);
   }
 }

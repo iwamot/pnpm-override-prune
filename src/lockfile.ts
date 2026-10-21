@@ -17,8 +17,8 @@ export class UnsupportedLockfileVersionError extends Error {
 
 export class MalformedLockfileError extends Error {
   override readonly name = "MalformedLockfileError";
-  constructor(message: string) {
-    super(`malformed lockfile: ${message}`);
+  constructor(message: string, options?: ErrorOptions) {
+    super(`malformed lockfile: ${message}`, options);
   }
 }
 
@@ -143,6 +143,7 @@ export function parseLockfile(content: string): Lockfile {
   } catch (e) {
     throw new MalformedLockfileError(
       e instanceof Error ? e.message : "yaml parse error",
+      { cause: e },
     );
   }
   if (!isObject(parsed)) {
