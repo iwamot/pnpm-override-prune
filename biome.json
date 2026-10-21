@@ -11,6 +11,12 @@
     "enabled": true,
     "rules": {
       "preset": "recommended",
+      "correctness": {
+        "noUnusedInstantiation": "error"
+      },
+      "style": {
+        "useErrorCause": "error"
+      },
       "suspicious": {
         "noExplicitAny": "error"
       }
