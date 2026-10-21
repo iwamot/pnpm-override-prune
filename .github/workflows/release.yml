@@ -38,6 +38,6 @@ jobs:
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
 
-      - uses: iwamot/actions/release-draft@877dcb21b865c1824a70cfebde66313b1d58a860 # v2.8.1
-      - uses: iwamot/actions/npm-publish@877dcb21b865c1824a70cfebde66313b1d58a860 # v2.8.1
-      - uses: iwamot/actions/release-publish@877dcb21b865c1824a70cfebde66313b1d58a860 # v2.8.1
+      - uses: iwamot/actions/release-draft@bd44fb7fb4de34d7ce57d2195e8abb9a9fee345a # v2.9.0
+      - uses: iwamot/actions/npm-publish@bd44fb7fb4de34d7ce57d2195e8abb9a9fee345a # v2.9.0
+      - uses: iwamot/actions/release-publish@bd44fb7fb4de34d7ce57d2195e8abb9a9fee345a # v2.9.0
