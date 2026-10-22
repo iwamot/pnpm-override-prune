@@ -11,7 +11,7 @@ locked = true
 biome = "2.5.15"
 bun = "1.4.3"
 node = "24.22.1"
-"aqua:aubepkg/aube" = "2.8.0"
+"aqua:aubepkg/aube" = "2.8.1"
 
 [task_config]
 includes = [
