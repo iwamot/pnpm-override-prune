@@ -3,21 +3,29 @@ name: Release
 on:
   push:
     tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.2.3)'
+        required: true
+        type: string
 
 permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   release:
     name: release
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     environment: production
     permissions:
       contents: write  # to manage the GitHub Release lifecycle
+      checks: read  # for required CI checks when the shared action waits before tagging
+      statuses: read  # for required legacy commit statuses
       id-token: write  # for npm Trusted Publishing OIDC
     steps:
       - name: Harden Runner
@@ -38,6 +46,17 @@ jobs:
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
 
-      - uses: iwamot/actions/release-draft@abf40f0c68ccedf952b3a895934925ce60c7e269 # v2.11.0
-      - uses: iwamot/actions/npm-publish@abf40f0c68ccedf952b3a895934925ce60c7e269 # v2.11.0
-      - uses: iwamot/actions/release-publish@abf40f0c68ccedf952b3a895934925ce60c7e269 # v2.11.0
+      - uses: iwamot/actions/release-tag@ac787438f61b5cbe16cf7b9946d16e6f0af4ff31 # v2.12.0
+        id: release-tag
+        with:
+          tag: ${{ inputs.tag || '' }}
+
+      - uses: iwamot/actions/release-draft@ac787438f61b5cbe16cf7b9946d16e6f0af4ff31 # v2.12.0
+        with:
+          tag: ${{ steps.release-tag.outputs.tag }}
+      - uses: iwamot/actions/npm-publish@ac787438f61b5cbe16cf7b9946d16e6f0af4ff31 # v2.12.0
+        with:
+          tag: ${{ steps.release-tag.outputs.tag }}
+      - uses: iwamot/actions/release-publish@ac787438f61b5cbe16cf7b9946d16e6f0af4ff31 # v2.12.0
+        with:
+          tag: ${{ steps.release-tag.outputs.tag }}
