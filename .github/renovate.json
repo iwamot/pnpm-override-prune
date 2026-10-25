@@ -1,4 +1,25 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>iwamot/renovate-config#v0.20.0"]
+  "extends": [
+    "github>iwamot/renovate-config#v0.20.0"
+  ],
+  "packageRules": [
+    {
+      "description": "Update the Bun runtime and its API types together",
+      "matchManagers": [
+        "mise",
+        "npm"
+      ],
+      "matchPackageNames": [
+        "oven-sh/bun",
+        "@types/bun"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch"
+      ],
+      "groupName": "bun"
+    }
+  ]
 }
