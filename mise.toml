@@ -9,7 +9,7 @@ minimum_release_age = "1d"
 biome = "2.6.3"
 bun = "1.4.4"
 node = "24.22.1"
-"aqua:aubepkg/aube" = "2.8.2"
+"aqua:aubepkg/aube" = "2.8.3"
 
 [task_config]
 includes = [
