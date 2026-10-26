@@ -11,8 +11,7 @@ if (decision.kind === "sync") {
   if (decision.stderr) {
     process.stderr.write(decision.stderr);
   }
-  process.exit(decision.exitCode);
+  process.exitCode = decision.exitCode;
+} else {
+  process.exitCode = await runAudit(decision.path, decision.fix);
 }
-
-const exitCode = await runAudit(decision.path, decision.fix);
-process.exit(exitCode);
