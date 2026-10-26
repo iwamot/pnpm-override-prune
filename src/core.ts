@@ -65,8 +65,12 @@ interface FoundFile {
 async function readFileIfExists(path: string): Promise<string | null> {
   try {
     return await readFile(path, "utf8");
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return null;
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`cannot read ${path}: ${detail}`, { cause: error });
   }
 }
 
@@ -155,26 +159,28 @@ export async function runAudit(
   packageJsonPath: string,
   fix: boolean,
 ): Promise<number> {
-  const packageJsonContent = await readFileIfExists(packageJsonPath);
-  if (packageJsonContent === null) {
-    emitError(`file not found: ${packageJsonPath}`);
-    return 2;
-  }
-  const dir = dirname(packageJsonPath);
-  const workspace = await findFirstExisting(dir, WORKSPACE_FILENAMES);
-  const lockResult = await findFirstExisting(dir, LOCKFILE_FILENAMES);
-  if (lockResult === null) {
-    emitError(
-      `no lockfile found in ${dir} (looked for ${LOCKFILE_FILENAMES.join(", ")})`,
-    );
-    return 2;
-  }
+  let packageJsonContent: string | null;
+  let workspace: FoundFile | null;
   let allOverrides: readonly Override[];
   let lockfile: Lockfile;
   let workspaceDirectDeps: WorkspaceDirectDeps;
   let registryConfig: RegistryConfig;
   let releasePolicy: ReleasePolicy;
   try {
+    packageJsonContent = await readFileIfExists(packageJsonPath);
+    if (packageJsonContent === null) {
+      emitError(`file not found: ${packageJsonPath}`);
+      return 2;
+    }
+    const dir = dirname(packageJsonPath);
+    workspace = await findFirstExisting(dir, WORKSPACE_FILENAMES);
+    const lockResult = await findFirstExisting(dir, LOCKFILE_FILENAMES);
+    if (lockResult === null) {
+      emitError(
+        `no lockfile found in ${dir} (looked for ${LOCKFILE_FILENAMES.join(", ")})`,
+      );
+      return 2;
+    }
     const fromPackage = parsePackageJsonOverrides(packageJsonContent);
     const fromWorkspace =
       workspace === null
