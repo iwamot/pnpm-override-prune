@@ -20,4 +20,4 @@ jobs:
       # `engines.node` in package.json carries the same number: that field is
       # what promises the package installs there. Both move when a release
       # leaves support.
-      node-versions: '["22","24"]'
+      node-versions: '["22","24","26"]'
