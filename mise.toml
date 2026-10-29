@@ -8,7 +8,7 @@ minimum_release_age = "1d"
 [tools]
 biome = "2.6.3"
 bun = "1.4.4"
-node = "26.12.1"
+node = "26.13.0"
 "aqua:aubepkg/aube" = "2.8.4"
 
 [task_config]
