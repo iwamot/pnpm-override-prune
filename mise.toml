@@ -9,7 +9,7 @@ minimum_release_age = "1d"
 locked = true
 
 [tools]
-biome = "2.6.5"
+biome = "2.6.6"
 bun = "1.4.4"
 node = "26.13.0"
 "aqua:aubepkg/aube" = "2.9.0"
