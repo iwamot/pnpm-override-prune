@@ -10,7 +10,7 @@ workflows:
     '.github/workflows/dependency-review.yml': []
     '.github/workflows/oide.yml': []
     '.github/workflows/release.yml':
-        - 'iwamot/actions@0cc8920c2941f4e51302920bc6f705f3ad2c0608'
+        - 'iwamot/actions@822d705bcb3db0cb3c1f969001c6de5eda9660f1'
         - 'step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a'
     '.github/workflows/renovate.yml': []
     '.github/workflows/validate.yml': []
@@ -20,17 +20,17 @@ dependencies:
         commit: 'sha1-3d3c42e5aac5ba805825da76410c181273ba90b1'
         owner_id: 44036562
         repo_id: 197814629
-    'iwamot/actions@0cc8920c2941f4e51302920bc6f705f3ad2c0608':
-        ref: 'v2.13.2'
-        commit: 'sha1-0cc8920c2941f4e51302920bc6f705f3ad2c0608'
+    'iwamot/actions@822d705bcb3db0cb3c1f969001c6de5eda9660f1':
+        ref: 'v2.13.3'
+        commit: 'sha1-822d705bcb3db0cb3c1f969001c6de5eda9660f1'
         owner_id: 16149
         repo_id: 1215968540
         uses:
             - 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1'
-            - 'jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d'
-    'jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d':
-        ref: 'v5.2.4'
-        commit: 'sha1-6be3c7ed4c21d4f76b208d351d95aac273ebb76d'
+            - 'jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b'
+    'jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b':
+        ref: 'v5.2.7'
+        commit: 'sha1-b44d12e7d0d8ee7461bb893e1b1993500433185b'
         owner_id: 216188
         repo_id: 738284564
     'step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a':
