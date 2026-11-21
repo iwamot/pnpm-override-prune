@@ -53,86 +53,37 @@ describe("isPureLowerBound", () => {
   });
 });
 
-describe("isNestedKey", () => {
-  it("recognizes parent>child syntax", () => {
-    expect(isNestedKey("foo>bar")).toBe(true);
+describe("override key structure", () => {
+  it("round-trips flat keys and distinguishes nested keys from range comparators", () => {
+    const names = ["foo", "with-dash", "@scope/pkg"];
+    const selectors = [
+      null,
+      "^1.0.0",
+      ">=4.0.0 <=4.17.22",
+      "> 4.0.0",
+      "1.0.0",
+      ">=1.0.0 || > 2.0.0",
+      ...Array.from({ length: 10 }, (_, major) => `>${major}.0.0`),
+    ];
+    for (const name of names) {
+      for (const selectorRaw of selectors) {
+        const key = selectorRaw === null ? name : `${name}@${selectorRaw}`;
+        expect(parseKey(key)).toEqual({ name, selectorRaw });
+        expect(isNestedKey(key)).toBe(false);
+        for (const child of names) {
+          expect(isNestedKey(`${key}>${child}`)).toBe(true);
+        }
+      }
+    }
   });
 
-  it("recognizes parent@version>child syntax", () => {
-    expect(isNestedKey("qar@1>zoo")).toBe(true);
-  });
-
-  it("treats flat name as not nested", () => {
-    expect(isNestedKey("foo")).toBe(false);
-  });
-
-  it("treats scoped flat name as not nested", () => {
-    expect(isNestedKey("@scope/foo")).toBe(false);
-  });
-
-  it("treats empty string as not nested", () => {
+  it("treats an empty key as flat with no selector", () => {
+    expect(parseKey("")).toEqual({ name: "", selectorRaw: null });
     expect(isNestedKey("")).toBe(false);
-  });
-
-  it("does not confuse '>=' comparator inside selector", () => {
-    expect(isNestedKey("lodash@>=4.0.0 <=4.17.22")).toBe(false);
-  });
-
-  it("does not confuse '>X' bare comparator", () => {
-    expect(isNestedKey("lodash@>4.0.0")).toBe(false);
-  });
-
-  it("does not confuse '> X' (space-separated comparator)", () => {
-    expect(isNestedKey("lodash@> 4.0.0")).toBe(false);
   });
 
   it("treats trailing '>' as nested (malformed)", () => {
     expect(isNestedKey("foo>")).toBe(true);
-  });
-});
-
-describe("parseKey", () => {
-  it("returns null selector for plain name", () => {
-    expect(parseKey("foo")).toEqual({ name: "foo", selectorRaw: null });
-  });
-
-  it("returns null selector for scoped name", () => {
-    expect(parseKey("@scope/foo")).toEqual({
-      name: "@scope/foo",
-      selectorRaw: null,
-    });
-  });
-
-  it("splits name and selector for caret range", () => {
-    expect(parseKey("ajv@^8.0.0")).toEqual({
-      name: "ajv",
-      selectorRaw: "^8.0.0",
-    });
-  });
-
-  it("splits name and selector for scoped + caret range", () => {
-    expect(parseKey("@azure/core-rest-pipeline@^1.0.0")).toEqual({
-      name: "@azure/core-rest-pipeline",
-      selectorRaw: "^1.0.0",
-    });
-  });
-
-  it("splits name and selector for compound range", () => {
-    expect(parseKey("lodash@>=4.0.0 <=4.17.22")).toEqual({
-      name: "lodash",
-      selectorRaw: ">=4.0.0 <=4.17.22",
-    });
-  });
-
-  it("splits name and selector for exact pin", () => {
-    expect(parseKey("foo@1.0.0")).toEqual({
-      name: "foo",
-      selectorRaw: "1.0.0",
-    });
-  });
-
-  it("treats empty string as plain", () => {
-    expect(parseKey("")).toEqual({ name: "", selectorRaw: null });
   });
 });
 
