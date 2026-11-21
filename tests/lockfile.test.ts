@@ -8,33 +8,29 @@ import {
   UnsupportedLockfileVersionError,
 } from "../src/lockfile.ts";
 
-describe("parseSnapshotKey", () => {
-  it("parses unscoped name@version", () => {
-    expect(parseSnapshotKey("speech-rule-engine@4.1.4")).toEqual({
-      name: "speech-rule-engine",
-      version: "4.1.4",
-    });
-  });
-
-  it("parses scoped name@version", () => {
-    expect(parseSnapshotKey("@xmldom/xmldom@0.9.10")).toEqual({
-      name: "@xmldom/xmldom",
-      version: "0.9.10",
-    });
-  });
-
-  it("strips peer dependency decorations", () => {
-    expect(parseSnapshotKey("foo@1.0.0(bar@2.0.0)")).toEqual({
-      name: "foo",
-      version: "1.0.0",
-    });
-  });
-
-  it("strips peer decorations on scoped names", () => {
-    expect(parseSnapshotKey("@a/b@1.0.0(c@2.0.0)(d@3.0.0)")).toEqual({
-      name: "@a/b",
-      version: "1.0.0",
-    });
+describe("lockfile package identities", () => {
+  it("recovers package identities regardless of peer decorations", () => {
+    const names = ["pkg", "speech-rule-engine", "@scope/pkg"];
+    const versions = ["0.0.0", "1.2.3", "2.0.0-rc.1+build.7"];
+    const peerGroups = [
+      [],
+      ["peer@3.0.0"],
+      ["@scope/peer@4.0.0"],
+      ["peer@3.0.0", "@scope/peer@4.0.0"],
+      ["@scope/peer@4.0.0", "peer@3.0.0"],
+    ];
+    for (const name of names) {
+      for (const version of versions) {
+        for (const peers of peerGroups) {
+          const decorated = version + peers.map((peer) => `(${peer})`).join("");
+          expect(parseSnapshotKey(`${name}@${decorated}`)).toEqual({
+            name,
+            version,
+          });
+          expect(parseResolvedVersion(decorated)).toBe(version);
+        }
+      }
+    }
   });
 
   it("rejects keys without an @ separator", () => {
@@ -51,22 +47,6 @@ describe("parseSnapshotKey", () => {
 
   it("rejects keys with empty version", () => {
     expect(parseSnapshotKey("foo@")).toBeNull();
-  });
-});
-
-describe("parseResolvedVersion", () => {
-  it("returns plain version unchanged", () => {
-    expect(parseResolvedVersion("1.0.0")).toBe("1.0.0");
-  });
-
-  it("strips single peer decoration", () => {
-    expect(parseResolvedVersion("1.0.0(peer@2.0.0)")).toBe("1.0.0");
-  });
-
-  it("strips multiple peer decorations", () => {
-    expect(parseResolvedVersion("1.0.0(peer@2.0.0)(other@3.0.0)")).toBe(
-      "1.0.0",
-    );
   });
 });
 
