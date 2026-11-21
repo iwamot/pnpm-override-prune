@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { stringify } from "yaml";
 import {
   extractMainDocument,
   MalformedLockfileError,
@@ -89,50 +90,101 @@ snapshots:
 `;
 
 describe("parseLockfile", () => {
-  it("parses a valid v9.0 lockfile", () => {
-    const lf = parseLockfile(VALID_LOCKFILE);
-    expect(lf.version).toBe("9.0");
-  });
-
-  it("collects importer paths from the importers section", () => {
-    const lf = parseLockfile(VALID_LOCKFILE);
-    expect(lf.importerPaths).toEqual(["."]);
-  });
-
-  it("collects every importer key (including empty importers)", () => {
-    const content = `lockfileVersion: '9.0'
-
-importers:
-
-  .: {}
-
-  packages/a:
-    dependencies:
-      foo:
-        specifier: ^1.0.0
-        version: 1.0.0
-
-  packages/b: {}
-`;
-    const lf = parseLockfile(content);
-    expect(lf.importerPaths).toEqual([".", "packages/a", "packages/b"]);
-  });
-
-  it("collects transitive parents from snapshots dependencies", () => {
-    const lf = parseLockfile(VALID_LOCKFILE);
-    const parents = lf.transitiveParents.get("@xmldom/xmldom");
-    expect(parents).toEqual([
-      { parentKey: "speech-rule-engine@4.1.4", resolvedVersion: "0.9.10" },
-      { parentKey: "another-parent@2.0.0", resolvedVersion: "0.9.10" },
-    ]);
-  });
-
-  it("collects optional dependencies as transitive parents too", () => {
-    const lf = parseLockfile(VALID_LOCKFILE);
-    const parents = lf.transitiveParents.get("optionaldep");
-    expect(parents).toEqual([
-      { parentKey: "speech-rule-engine@4.1.4", resolvedVersion: "1.2.3" },
-    ]);
+  it("recovers importer paths and every incoming dependency edge", () => {
+    const edges = [
+      {
+        parent: "parent@1.0.0",
+        target: "foo",
+        version: "1.0.0",
+        optional: false,
+      },
+      {
+        parent: "@scope/parent@2.0.0",
+        target: "foo",
+        version: "2.0.0",
+        optional: true,
+      },
+      {
+        parent: "parent@1.0.0",
+        target: "@scope/bar",
+        version: "3.0.0",
+        optional: true,
+      },
+      {
+        parent: "other@3.0.0",
+        target: "@scope/bar",
+        version: "4.0.0-rc.1",
+        optional: false,
+      },
+    ];
+    for (let mask = 0; mask < 2 ** edges.length; mask++) {
+      const selected = edges.filter((_, index) => (mask & (1 << index)) !== 0);
+      for (const paths of [[], ["."], ["packages/b", ".", "packages/a"]]) {
+        for (const decoration of ["", "(peer@5.0.0)(@scope/peer@6.0.0)"]) {
+          const snapshots: Record<
+            string,
+            Record<string, Record<string, string>>
+          > = {};
+          for (const edge of selected) {
+            const parentKey = edge.parent + decoration;
+            snapshots[parentKey] ??= {};
+            const snapshot = snapshots[parentKey];
+            const field = edge.optional
+              ? "optionalDependencies"
+              : "dependencies";
+            snapshot[field] ??= {};
+            snapshot[field][edge.target] = edge.version + decoration;
+          }
+          const importers = Object.fromEntries(
+            paths.map(
+              (path, index) =>
+                [
+                  path,
+                  index === 0
+                    ? {}
+                    : {
+                        dependencies: {
+                          "importer-only": {
+                            specifier: "^1.0.0",
+                            version: "1.0.0",
+                          },
+                        },
+                      },
+                ] as const,
+            ),
+          );
+          const lf = parseLockfile(
+            stringify({
+              lockfileVersion: "9.0",
+              importers,
+              packages: {
+                "metadata-only@1.0.0": {
+                  resolution: { integrity: "sha512-foo" },
+                },
+              },
+              snapshots,
+            }),
+          );
+          expect(lf.version).toBe("9.0");
+          expect(lf.importerPaths).toEqual(paths);
+          const targets = [...new Set(selected.map((edge) => edge.target))];
+          expect([...lf.transitiveParents.keys()].sort()).toEqual(
+            targets.sort(),
+          );
+          for (const target of targets) {
+            const expected = selected
+              .filter((edge) => edge.target === target)
+              .map((edge) => ({
+                parentKey: edge.parent + decoration,
+                resolvedVersion: edge.version,
+              }));
+            const actual = lf.transitiveParents.get(target);
+            expect(actual).toHaveLength(expected.length);
+            expect(actual).toEqual(expect.arrayContaining(expected));
+          }
+        }
+      }
+    }
   });
 
   it("throws UnsupportedLockfileVersionError on missing version", () => {
