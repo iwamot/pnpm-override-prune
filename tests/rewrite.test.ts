@@ -22,42 +22,100 @@ function topLevel(keys: readonly string[]) {
 }
 
 describe("removeFromPackageJson", () => {
-  it("removes the given keys from pnpm.overrides", () => {
-    const before = `{
-  "name": "demo",
-  "pnpm": {
-    "overrides": {
-      "@xmldom/xmldom": ">=0.9.10",
-      "postcss": ">=8.5.10",
-      "keep-me": "1.0.0"
+  it("preserves unselected data and layout for every removal subset", () => {
+    const base = {
+      name: "日本語 fixture",
+      scripts: { build: "keep this command" },
+      dependencies: { "@scope/pkg": "5.0.0" },
+      pnpm: {
+        overrides: { "@scope/pkg": "1.0.0" },
+        onlyBuiltDependencies: ["native-package"],
+      },
+      aube: { overrides: { "@scope/pkg": "2.0.0" } },
+      overrides: { "@scope/pkg": "3.0.0" },
+      resolutions: { "@scope/pkg": "4.0.0" },
+      custom: { overrides: { "@scope/pkg": "6.0.0" } },
+    };
+    const layouts = [
+      {
+        container: "package.json:pnpm.overrides",
+        wrap: (overrides: Record<string, string>) => ({
+          ...base,
+          pnpm: { ...base.pnpm, overrides },
+        }),
+      },
+      {
+        container: "package.json:aube.overrides",
+        wrap: (overrides: Record<string, string>) => ({
+          ...base,
+          aube: { ...base.aube, overrides },
+        }),
+      },
+      {
+        container: "package.json:overrides",
+        wrap: (overrides: Record<string, string>) => ({ ...base, overrides }),
+      },
+      {
+        container: "package.json:resolutions",
+        wrap: (resolutions: Record<string, string>) => ({
+          ...base,
+          resolutions,
+        }),
+      },
+    ] satisfies {
+      container: PackageJsonContainer;
+      wrap: (overrides: Record<string, string>) => unknown;
+    }[];
+    const entries = [
+      ["foo", ">=1.0.0"],
+      ["@scope/pkg", "1.2.3"],
+      ["parent@^1.0.0>child", ">=2.0.0"],
+      ["other", "npm:aliased@^3.0.0"],
+    ] as const;
+    for (let mask = 0; mask < 1 << entries.length; mask++) {
+      const tagged = entries.map(([key, value], index) => ({
+        key,
+        value,
+        remove: (mask & (1 << index)) !== 0,
+      }));
+      const selected = tagged
+        .filter((entry) => entry.remove)
+        .map(({ key }) => key);
+      const retained = Object.fromEntries(
+        tagged
+          .filter((entry) => !entry.remove)
+          .map(({ key, value }) => [key, value] as const),
+      );
+      for (const { container, wrap } of layouts) {
+        for (const indent of [undefined, 2, 4, "\t"]) {
+          for (const newline of ["", "\n"]) {
+            const before =
+              JSON.stringify(wrap(Object.fromEntries(entries)), null, indent) +
+              newline;
+            const removal = new Map<PackageJsonContainer, readonly string[]>(
+              layouts.map(({ container }) => [container, []] as const),
+            );
+            removal.set(container, selected);
+            const after = removeFromPackageJson(before, removal);
+            const actual: unknown = JSON.parse(after);
+            // Normalize whitespace while retaining every field's value and key order.
+            expect(JSON.stringify(actual)).toBe(JSON.stringify(wrap(retained)));
+            expect(after.endsWith("\n")).toBe(newline === "\n");
+            expect(removeFromPackageJson(after, removal)).toBe(after);
+            if (selected.length === 0) {
+              expect(after).toBe(before);
+            } else {
+              const spacing =
+                typeof indent === "number"
+                  ? " ".repeat(indent)
+                  : (indent ?? "  ");
+              expect(after).toContain(`\n${spacing}"name":`);
+              expect(after).toContain(`\n${spacing.repeat(2)}"overrides":`);
+            }
+          }
+        }
+      }
     }
-  }
-}
-`;
-    const after = removeFromPackageJson(
-      before,
-      pnpm(["@xmldom/xmldom", "postcss"]),
-    );
-    const parsed = JSON.parse(after) as Record<string, unknown>;
-    const pnpmField = parsed.pnpm as Record<string, unknown>;
-    const overrides = pnpmField.overrides as Record<string, unknown>;
-    expect(Object.keys(overrides)).toEqual(["keep-me"]);
-    expect(overrides["keep-me"]).toBe("1.0.0");
-  });
-
-  it("removes the given keys from top-level overrides", () => {
-    const before = `{
-  "name": "demo",
-  "overrides": {
-    "foo": ">=1.0.0",
-    "bar": ">=2.0.0"
-  }
-}
-`;
-    const after = removeFromPackageJson(before, topLevel(["foo"]));
-    const parsed = JSON.parse(after) as Record<string, unknown>;
-    const overrides = parsed.overrides as Record<string, unknown>;
-    expect(Object.keys(overrides)).toEqual(["bar"]);
   });
 
   it("removes from both containers in a single call", () => {
@@ -83,40 +141,6 @@ describe("removeFromPackageJson", () => {
     ]);
   });
 
-  it("preserves trailing newline when present in input", () => {
-    const before = `{"pnpm":{"overrides":{"foo":">=1.0.0"}}}\n`;
-    const after = removeFromPackageJson(before, pnpm(["foo"]));
-    expect(after.endsWith("\n")).toBe(true);
-  });
-
-  it("omits trailing newline when input lacks one", () => {
-    const before = `{"pnpm":{"overrides":{"foo":">=1.0.0"}}}`;
-    const after = removeFromPackageJson(before, pnpm(["foo"]));
-    expect(after.endsWith("\n")).toBe(false);
-  });
-
-  it("preserves 4-space indent when input uses it", () => {
-    const before = `{
-    "pnpm": {
-        "overrides": {
-            "foo": ">=1.0.0",
-            "bar": ">=2.0.0"
-        }
-    }
-}
-`;
-    const after = removeFromPackageJson(before, pnpm(["foo"]));
-    expect(after).toContain('    "pnpm"');
-    expect(after).toContain('        "overrides"');
-  });
-
-  it("preserves tab indent when input uses tabs", () => {
-    const before =
-      '{\n\t"pnpm": {\n\t\t"overrides": {\n\t\t\t"foo": ">=1.0.0"\n\t\t}\n\t}\n}\n';
-    const after = removeFromPackageJson(before, pnpm(["foo"]));
-    expect(after).toContain("\t");
-  });
-
   it("returns content unchanged when every removal list is empty", () => {
     const before = `{"pnpm":{"overrides":{"foo":">=1.0.0"}}}`;
     expect(
@@ -129,31 +153,6 @@ describe("removeFromPackageJson", () => {
       ),
     ).toBe(before);
     expect(removeFromPackageJson(before, new Map())).toBe(before);
-  });
-
-  it("removes the given keys from aube.overrides", () => {
-    const before = `{"aube":{"overrides":{"foo":">=1.0.0","bar":">=2.0.0"}}}`;
-    const after = removeFromPackageJson(
-      before,
-      only("package.json:aube.overrides", ["foo"]),
-    );
-    const parsed = JSON.parse(after) as Record<string, unknown>;
-    const aubeField = parsed.aube as Record<string, unknown>;
-    expect(Object.keys(aubeField.overrides as Record<string, unknown>)).toEqual(
-      ["bar"],
-    );
-  });
-
-  it("removes the given keys from resolutions", () => {
-    const before = `{"resolutions":{"foo":">=1.0.0","bar":">=2.0.0"}}`;
-    const after = removeFromPackageJson(
-      before,
-      only("package.json:resolutions", ["bar"]),
-    );
-    const parsed = JSON.parse(after) as Record<string, unknown>;
-    expect(Object.keys(parsed.resolutions as Record<string, unknown>)).toEqual([
-      "foo",
-    ]);
   });
 
   it("returns content unchanged when resolutions is absent", () => {
@@ -196,24 +195,6 @@ describe("removeFromPackageJson", () => {
   it("returns content unchanged when root is not an object", () => {
     const before = `[1,2,3]`;
     expect(removeFromPackageJson(before, pnpm(["foo"]))).toBe(before);
-  });
-
-  it("leaves remaining override keys untouched and stable in order", () => {
-    const before = `{
-  "pnpm": {
-    "overrides": {
-      "a": "1",
-      "b": "2",
-      "c": "3"
-    }
-  }
-}
-`;
-    const after = removeFromPackageJson(before, pnpm(["b"]));
-    expect(after).toContain('"a": "1"');
-    expect(after).toContain('"c": "3"');
-    expect(after).not.toContain('"b"');
-    expect(after.indexOf('"a"')).toBeLessThan(after.indexOf('"c"'));
   });
 });
 
