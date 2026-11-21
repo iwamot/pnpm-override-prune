@@ -264,31 +264,33 @@ describe("classify", () => {
     });
   });
 
-  it("prunes when resolved version satisfies the lower bound", () => {
-    expect(classify(">=1.0.0", "2.0.0")).toEqual({
-      status: "prune",
-      value: "2.0.0",
-    });
-  });
-
-  it("prunes at exact lower bound", () => {
-    expect(classify(">=2.0.0", "2.0.0")).toEqual({
-      status: "prune",
-      value: "2.0.0",
-    });
-  });
-
-  it("keeps when resolved version is below the bound", () => {
-    expect(classify(">=2.0.0", "1.0.0")).toEqual({
-      status: "keep",
-      value: "1.0.0",
-    });
-  });
-
-  it("keeps when resolved equals the strict-greater bound", () => {
-    expect(classify(">2.0.0", "2.0.0")).toEqual({
-      status: "keep",
-      value: "2.0.0",
-    });
+  it("prunes exactly the versions above the floor, including equality for >=", () => {
+    const orderedVersions = [
+      "0.0.0",
+      "1.0.0-alpha.2",
+      "1.0.0-alpha.10",
+      "1.0.0-beta.1",
+      "1.0.0",
+      "1.0.2",
+      "1.0.10",
+      "1.2.0",
+      "1.10.0",
+      "2.0.0",
+      "10.0.0",
+    ];
+    for (const [floorIndex, floor] of orderedVersions.entries()) {
+      for (const [resolvedIndex, resolved] of orderedVersions.entries()) {
+        for (const inclusive of [false, true]) {
+          const spec = `${inclusive ? ">=" : ">"}${floor}`;
+          const prunable = inclusive
+            ? resolvedIndex >= floorIndex
+            : resolvedIndex > floorIndex;
+          expect(classify(spec, resolved)).toEqual({
+            status: prunable ? "prune" : "keep",
+            value: resolved,
+          });
+        }
+      }
+    }
   });
 });
