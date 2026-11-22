@@ -90,7 +90,7 @@ snapshots:
 `;
 
 describe("parseLockfile", () => {
-  it("recovers importer paths and every incoming dependency edge", () => {
+  it("recovers importer paths and every dependency edge despite malformed snapshot data", () => {
     const edges = [
       {
         parent: "parent@1.0.0",
@@ -162,7 +162,18 @@ describe("parseLockfile", () => {
                   resolution: { integrity: "sha512-foo" },
                 },
               },
-              snapshots,
+              snapshots: {
+                "invalid-snapshot@1.0.0": "not-a-map",
+                "invalid-fields@1.0.0": {
+                  dependencies: "not-a-map",
+                  optionalDependencies: [],
+                },
+                "invalid-values@1.0.0": {
+                  dependencies: { "bad-required": { nested: "object" } },
+                  optionalDependencies: { "bad-optional": 42 },
+                },
+                ...snapshots,
+              },
             }),
           );
           expect(lf.version).toBe("9.0");
@@ -243,36 +254,6 @@ describe("parseLockfile", () => {
     const lf = parseLockfile("lockfileVersion: '9.0'\n");
     expect(lf.transitiveParents.size).toBe(0);
     expect(lf.importerPaths).toEqual([]);
-  });
-
-  it("ignores snapshot entries that are not mappings", () => {
-    const lockfile = `lockfileVersion: '9.0'
-snapshots:
-  foo@1.0.0: invalid-string
-`;
-    const lf = parseLockfile(lockfile);
-    expect(lf.transitiveParents.size).toBe(0);
-  });
-
-  it("ignores snapshot dep maps that are not mappings", () => {
-    const lockfile = `lockfileVersion: '9.0'
-snapshots:
-  foo@1.0.0:
-    dependencies: not-a-map
-`;
-    const lf = parseLockfile(lockfile);
-    expect(lf.transitiveParents.size).toBe(0);
-  });
-
-  it("ignores snapshot dep values that are not strings", () => {
-    const lockfile = `lockfileVersion: '9.0'
-snapshots:
-  foo@1.0.0:
-    dependencies:
-      bar: {nested: object}
-`;
-    const lf = parseLockfile(lockfile);
-    expect(lf.transitiveParents.size).toBe(0);
   });
 });
 
