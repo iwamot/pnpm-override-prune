@@ -224,37 +224,43 @@ describe("registryFor", () => {
     return buildRegistryConfig({ env, projectNpmrc, userNpmrc: null });
   }
 
-  it("uses the default registry without credentials", () => {
-    expect(registryFor("lodash", configFrom(""))).toEqual({
-      baseUrl: DEFAULT_REGISTRY,
-      authorization: null,
-    });
-  });
-
-  it("routes a scoped package to its scope registry", () => {
-    const config = configFrom("@myorg:registry=https://npm.example.com/");
-    expect(registryFor("@myorg/pkg", config).baseUrl).toBe(
-      "https://npm.example.com",
-    );
-    expect(registryFor("lodash", config).baseUrl).toBe(DEFAULT_REGISTRY);
-    expect(registryFor("@other/pkg", config).baseUrl).toBe(DEFAULT_REGISTRY);
-  });
-
-  it("does not treat a bare @name without a slash as scoped", () => {
-    const config = configFrom("@weird:registry=https://npm.example.com/");
-    expect(registryFor("@weird", config).baseUrl).toBe(DEFAULT_REGISTRY);
-  });
-
-  it("lets the scope registry win over an environment default", () => {
-    const config = configFrom("@myorg:registry=https://npm.example.com/", {
-      npm_config_registry: "https://env.example.com/",
-    });
-    expect(registryFor("@myorg/pkg", config).baseUrl).toBe(
-      "https://npm.example.com",
-    );
-    expect(registryFor("lodash", config).baseUrl).toBe(
-      "https://env.example.com",
-    );
+  it("routes exact scopes independently of the default registry and configuration order", () => {
+    const scopes = [
+      ["@myorg:registry", "https://npm.example.com"],
+      ["@myorg-extra:registry", "https://other.example.com/team"],
+    ] as const;
+    for (let mask = 0; mask < 2 ** scopes.length; mask++) {
+      const selected = scopes.filter((_, index) => (mask & (1 << index)) !== 0);
+      for (const [env, fallback] of [
+        [{}, DEFAULT_REGISTRY],
+        [
+          { npm_config_registry: "https://env.example.com/" },
+          "https://env.example.com",
+        ],
+      ] as const) {
+        const org = (mask & 1) === 0 ? fallback : scopes[0][1];
+        const extra = (mask & 2) === 0 ? fallback : scopes[1][1];
+        for (const ordered of [selected, selected.toReversed()]) {
+          const config = configFrom(
+            ordered.map(([key, url]) => `${key}=${url}/`).join("\n"),
+            env,
+          );
+          for (const [name, baseUrl] of [
+            ["lodash", fallback],
+            ["@myorg/pkg", org],
+            ["@myorg/other", org],
+            ["@myorg-extra/pkg", extra],
+            ["@other/pkg", fallback],
+            ["@myorg", fallback],
+          ] as const) {
+            expect(registryFor(name, config)).toEqual({
+              baseUrl,
+              authorization: null,
+            });
+          }
+        }
+      }
+    }
   });
 
   it("selects credentials by path specificity, then bearer preference, independent of entry order", () => {
