@@ -28,12 +28,15 @@ describe("parsePackageJsonOverrides", () => {
       const expected = entries.filter(
         (_, index) => (mask & (1 << index)) !== 0,
       );
-      const mapping = (source: (typeof sources)[number]) =>
-        Object.fromEntries(
+      const mapping = (source: (typeof sources)[number]) => ({
+        invalidNumber: 42,
+        invalidObject: { nested: true },
+        ...Object.fromEntries(
           expected
             .filter((entry) => entry.source === source)
             .map(({ key, spec }) => [key, spec] as const),
-        );
+        ),
+      });
       const fields = [
         ["overrides", mapping("package.json:overrides")],
         ["pnpm", { overrides: mapping("package.json:pnpm.overrides") }],
@@ -43,43 +46,42 @@ describe("parsePackageJsonOverrides", () => {
         ["name", "demo"],
       ] as const;
       for (const ordered of [fields, [...fields].reverse()]) {
-        const content = JSON.stringify(Object.fromEntries(ordered));
-        expect(parsePackageJsonOverrides(content)).toEqual(expected);
+        for (const [source, field] of [
+          [null, null],
+          ["package.json:overrides", "overrides"],
+          ["package.json:pnpm.overrides", "pnpm"],
+          ["package.json:aube.overrides", "aube"],
+          ["package.json:resolutions", "resolutions"],
+        ] as const) {
+          const document = Object.fromEntries(ordered);
+          if (field !== null) {
+            document[field] = "not-a-map";
+          }
+          expect(parsePackageJsonOverrides(JSON.stringify(document))).toEqual(
+            expected.filter((entry) => entry.source !== source),
+          );
+        }
       }
     }
   });
 
-  it("returns empty array when pnpm field is absent", () => {
-    expect(parsePackageJsonOverrides('{"name":"x"}')).toEqual([]);
-  });
-
-  it("returns empty array when pnpm field is not a mapping", () => {
-    expect(parsePackageJsonOverrides('{"pnpm":"oops"}')).toEqual([]);
-  });
-
-  it("returns empty array when pnpm.overrides is absent", () => {
-    expect(parsePackageJsonOverrides('{"pnpm":{}}')).toEqual([]);
-  });
-
-  it("returns empty array when pnpm.overrides is not a mapping", () => {
-    expect(parsePackageJsonOverrides('{"pnpm":{"overrides":"oops"}}')).toEqual(
-      [],
-    );
-  });
-
-  it("ignores entries whose value is not a string", () => {
-    const content = JSON.stringify({
-      pnpm: {
-        overrides: {
-          good: ">=1.0.0",
-          weird: { nested: true },
-          alsoWeird: 42,
-        },
-      },
-    });
-    expect(parsePackageJsonOverrides(content)).toEqual([
-      { key: "good", spec: ">=1.0.0", source: "package.json:pnpm.overrides" },
-    ]);
+  it("ignores unavailable containers and non-object roots across all override sources", () => {
+    const nonMappings = [null, [], ["array-entry"], 42, "oops", true];
+    for (const root of nonMappings) {
+      expect(parsePackageJsonOverrides(JSON.stringify(root))).toEqual([]);
+    }
+    for (const value of [undefined, ...nonMappings]) {
+      for (const document of [
+        { overrides: value },
+        { pnpm: value },
+        { pnpm: { overrides: value } },
+        { aube: value },
+        { aube: { overrides: value } },
+        { resolutions: value },
+      ]) {
+        expect(parsePackageJsonOverrides(JSON.stringify(document))).toEqual([]);
+      }
+    }
   });
 
   it("flattens npm-style nested object overrides into parent>child keys", () => {
@@ -101,24 +103,10 @@ describe("parsePackageJsonOverrides", () => {
     ]);
   });
 
-  it("returns empty array when root is not an object", () => {
-    expect(parsePackageJsonOverrides("[1,2,3]")).toEqual([]);
-  });
-
   it("throws MalformedManifestError on invalid JSON", () => {
     expect(() => parsePackageJsonOverrides("{invalid")).toThrow(
       MalformedManifestError,
     );
-  });
-
-  it("returns empty array when top-level overrides is not a mapping", () => {
-    expect(parsePackageJsonOverrides('{"overrides":"oops"}')).toEqual([]);
-  });
-
-  it("returns empty array when aube field or resolutions is not a mapping", () => {
-    expect(parsePackageJsonOverrides('{"aube":"oops"}')).toEqual([]);
-    expect(parsePackageJsonOverrides('{"aube":{"overrides":[]}}')).toEqual([]);
-    expect(parsePackageJsonOverrides('{"resolutions":"oops"}')).toEqual([]);
   });
 });
 
@@ -136,7 +124,14 @@ describe("parseWorkspaceOverrides", () => {
       );
       const fields = [
         ["packages", ["apps/*"]],
-        ["overrides", Object.fromEntries(selected)],
+        [
+          "overrides",
+          {
+            invalidNumber: 42,
+            invalidObject: { nested: true },
+            ...Object.fromEntries(selected),
+          },
+        ],
         ["catalog", { "catalog-only": "^99.0.0" }],
         ["custom", { overrides: { "custom-only": ">=99.0.0" } }],
       ] as const;
@@ -158,44 +153,23 @@ describe("parseWorkspaceOverrides", () => {
     }
   });
 
-  it("returns empty array when overrides field is absent", () => {
-    expect(
-      parseWorkspaceOverrides(
-        "minimumReleaseAge: 1440\n",
-        "pnpm-workspace.yaml",
-      ),
-    ).toEqual([]);
-  });
-
-  it("returns empty array when overrides field is not a mapping", () => {
-    expect(
-      parseWorkspaceOverrides("overrides: oops\n", "pnpm-workspace.yaml"),
-    ).toEqual([]);
-  });
-
-  it("ignores entries whose value is not a string", () => {
-    const content = `overrides:
-  good: '>=1.0.0'
-  weird:
-    nested: true
-`;
-    expect(parseWorkspaceOverrides(content, "pnpm-workspace.yaml")).toEqual([
-      {
-        key: "good",
-        spec: ">=1.0.0",
-        source: "pnpm-workspace.yaml",
-      },
-    ]);
-  });
-
-  it("returns empty array when root is not a mapping", () => {
-    expect(
-      parseWorkspaceOverrides("- a\n- b\n", "pnpm-workspace.yaml"),
-    ).toEqual([]);
-  });
-
-  it("returns empty array on empty content", () => {
-    expect(parseWorkspaceOverrides("", "pnpm-workspace.yaml")).toEqual([]);
+  it("ignores absent or non-mapping overrides and non-mapping documents in either workspace", () => {
+    const nonMappings = [null, [], ["array-entry"], 42, "oops", true];
+    const documents = [
+      ...nonMappings,
+      ...[undefined, ...nonMappings].map((overrides) => ({ overrides })),
+    ];
+    for (const source of [
+      "pnpm-workspace.yaml",
+      "aube-workspace.yaml",
+    ] as const) {
+      expect(parseWorkspaceOverrides("", source)).toEqual([]);
+      for (const document of documents) {
+        for (const content of [stringify(document), JSON.stringify(document)]) {
+          expect(parseWorkspaceOverrides(content, source)).toEqual([]);
+        }
+      }
+    }
   });
 
   it("throws MalformedManifestError on invalid YAML", () => {
@@ -238,15 +212,25 @@ describe("buildWorkspaceDirectDeps", () => {
             (depType) =>
               [
                 depType,
-                Object.fromEntries(
-                  selected
-                    .filter(
-                      (edge) =>
-                        edge.importerKey === importerKey &&
-                        edge.depType === depType,
-                    )
-                    .map(({ name, spec }) => [name, spec] as const),
-                ),
+                selected.some(
+                  (edge) =>
+                    edge.importerKey === importerKey &&
+                    edge.depType === depType,
+                )
+                  ? {
+                      invalidNumber: 42,
+                      invalidObject: { nested: true },
+                      ...Object.fromEntries(
+                        selected
+                          .filter(
+                            (edge) =>
+                              edge.importerKey === importerKey &&
+                              edge.depType === depType,
+                          )
+                          .map(({ name, spec }) => [name, spec] as const),
+                      ),
+                    }
+                  : "not-a-map",
               ] as const,
           );
           return [
@@ -277,15 +261,6 @@ describe("buildWorkspaceDirectDeps", () => {
         }
       }
     }
-  });
-
-  it("ignores non-string spec values", () => {
-    const content = JSON.stringify({
-      dependencies: { good: "1.0.0", bad: 42 },
-    });
-    const result = buildWorkspaceDirectDeps(new Map([[".", content]]));
-    expect(result.get("good")).toBeDefined();
-    expect(result.get("bad")).toBeUndefined();
   });
 
   it("ignores importers whose root is not an object", () => {

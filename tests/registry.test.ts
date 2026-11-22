@@ -195,55 +195,46 @@ describe("parsePackageMetadata", () => {
             deprecated: false,
           });
         }
-        const metadata = parsePackageMetadata({ name: "pkg", versions }, "pkg");
-        expect(metadata.name).toBe("pkg");
-        expect(metadata.versions).toEqual(expected);
+        for (const invalidField of [null, [], 42, "oops", true]) {
+          const noisyVersions = Object.fromEntries(
+            Object.entries(versions).map(
+              ([version, record]) =>
+                [
+                  version,
+                  Object.fromEntries(
+                    fields.map(
+                      (field) =>
+                        [
+                          field,
+                          record[field] === undefined
+                            ? invalidField
+                            : {
+                                invalidNumber: 42,
+                                invalidObject: { nested: true },
+                                ...record[field],
+                              },
+                        ] as const,
+                    ),
+                  ),
+                ] as const,
+            ),
+          );
+          const metadata = parsePackageMetadata(
+            {
+              name: "pkg",
+              versions: {
+                "99.0.0": "not-a-map",
+                "98.0.0": [],
+                ...noisyVersions,
+              },
+            },
+            "pkg",
+          );
+          expect(metadata.name).toBe("pkg");
+          expect(metadata.versions).toEqual(expected);
+        }
       }
     }
-  });
-
-  it("ignores non-mapping dep fields", () => {
-    const raw = {
-      versions: {
-        "1.0.0": {
-          dependencies: "oops",
-          peerDependencies: { a: ">=1.0.0" },
-        },
-      },
-    };
-    const meta = parsePackageMetadata(raw, "x");
-    expect(meta.versions.get("1.0.0")?.dependencies.get("a")).toBe(">=1.0.0");
-  });
-
-  it("ignores non-string spec entries within a dep map", () => {
-    const raw = {
-      versions: {
-        "1.0.0": {
-          dependencies: {
-            good: ">=1.0.0",
-            weird: 42,
-            alsoWeird: { nested: true },
-          },
-        },
-      },
-    };
-    const meta = parsePackageMetadata(raw, "x");
-    const deps = meta.versions.get("1.0.0")?.dependencies;
-    expect(deps?.get("good")).toBe(">=1.0.0");
-    expect(deps?.has("weird")).toBe(false);
-    expect(deps?.has("alsoWeird")).toBe(false);
-  });
-
-  it("ignores version entries that are not mappings", () => {
-    const raw = {
-      versions: {
-        "1.0.0": "should-be-object",
-        "2.0.0": {},
-      },
-    };
-    const meta = parsePackageMetadata(raw, "x");
-    expect(meta.versions.has("1.0.0")).toBe(false);
-    expect(meta.versions.has("2.0.0")).toBe(true);
   });
 
   it("throws when root is not an object", () => {
