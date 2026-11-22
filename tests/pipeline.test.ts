@@ -238,34 +238,46 @@ describe("gatherSpecsForTarget", () => {
 });
 
 describe("evaluateOverride", () => {
-  it("skips entries categorized as nested-key with a reason", () => {
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo>bar", ">=1.0.0"),
-      makeLockfile({}),
-      NO_DIRECT,
-      new Map(),
-    );
-    expect(result).toEqual({ status: "skip", value: "(nested key)" });
-  });
-
-  it("skips entries with protocol-prefixed spec", () => {
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", "catalog:default"),
-      makeLockfile({}),
-      NO_DIRECT,
-      new Map(),
-    );
-    expect(result).toEqual({ status: "skip", value: "(protocol spec)" });
-  });
-
-  it("skips entries with non-lower-bound spec", () => {
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", "^1.0.0"),
-      makeLockfile({}),
-      NO_DIRECT,
-      new Map(),
-    );
-    expect(result).toEqual({ status: "skip", value: "(non-lower-bound)" });
+  it("preserves skip reasons before consulting registry outcomes or dependency constraints", () => {
+    const cases = [
+      ["foo>bar", ">=1.0.0", "(nested key)"],
+      ["foo@latest", ">=1.0.0", "(unsupported selector)"],
+      ["foo", "catalog:default", "(protocol spec)"],
+      ["foo", "^1.0.0", "(non-lower-bound)"],
+    ] as const;
+    const lockfile = makeLockfile({
+      transitive: {
+        foo: [{ parent: "parent@1.0.0", resolved: "1.0.0" }],
+      },
+    });
+    const registries = [
+      new Map<string, PackageMetadata | null>(),
+      new Map<string, PackageMetadata | null>([
+        ["foo", makeMetadata("foo", { "1.0.0": {} })],
+        ["parent", makeMetadata("parent", { "1.0.0": { foo: "^1.0.0" } })],
+      ]),
+      new Map<string, PackageMetadata | null>([
+        ["foo", null],
+        ["parent", null],
+      ]),
+    ];
+    for (const [key, spec, value] of cases) {
+      for (const registry of registries) {
+        for (const direct of [
+          NO_DIRECT,
+          makeWorkspaceDirectDeps({ foo: "workspace:*" }),
+        ]) {
+          expect(
+            evaluateOverride(
+              PKG_OVERRIDE(key, spec),
+              lockfile,
+              direct,
+              registry,
+            ),
+          ).toEqual({ status: "skip", value });
+        }
+      }
+    }
   });
 
   it("prunes entries with no surviving constraints (unused)", () => {
@@ -435,16 +447,6 @@ describe("evaluateOverride", () => {
         }
       }
     }
-  });
-
-  it("skips versioned keys with non-semver-range selector", () => {
-    const result = evaluateOverride(
-      PKG_OVERRIDE("ajv@latest", ">=8.18.0"),
-      makeLockfile({}),
-      NO_DIRECT,
-      new Map(),
-    );
-    expect(result).toEqual({ status: "skip", value: "(unsupported selector)" });
   });
 
   it("compares natural resolution with override floors for flat and selector-qualified keys", () => {
@@ -745,6 +747,7 @@ describe("registry package collection", () => {
           for (const { target, override, active } of [first, second]) {
             if (override === null) continue;
             overrides.push(override);
+            expect(targetOf(override)).toBe(active ? target : null);
             const names = active
               ? [
                   target,
@@ -869,16 +872,5 @@ describe("evaluateOverride with a release-age policy", () => {
         }
       }
     }
-  });
-});
-
-describe("targetOf", () => {
-  it("names the package an override pins", () => {
-    expect(targetOf(PKG_OVERRIDE("foo", ">=1.0.0"))).toBe("foo");
-    expect(targetOf(PKG_OVERRIDE("foo@<1.0.0", ">=1.0.0"))).toBe("foo");
-  });
-
-  it("is null for an entry the audit skips", () => {
-    expect(targetOf(PKG_OVERRIDE("parent>child", "1.2.3"))).toBeNull();
   });
 });
