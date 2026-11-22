@@ -226,28 +226,13 @@ describe("needsPublishTimes", () => {
   });
 });
 
-describe("publishedPool", () => {
-  it("carries every version, the latest tag, and deprecations", () => {
-    const m = meta({
-      versions: ["1.0.0", "1.1.0"],
-      latest: "1.1.0",
-      deprecated: ["1.0.0"],
-    });
-    expect(publishedPool(m)).toEqual({
-      versions: ["1.0.0", "1.1.0"],
-      latest: "1.1.0",
-      deprecated: new Set(["1.0.0"]),
-    });
-  });
-});
-
-describe("admittedPool", () => {
+describe("version pools", () => {
   it("is the published pool when nothing is filtered", () => {
     const m = meta({ versions: ["1.0.0"], latest: "1.0.0" });
     expect(admittedPool(m, policy(1440), "pkg")).toEqual(publishedPool(m));
   });
 
-  it("preserves pool metadata and repoints latest within its release stage and version ceiling", () => {
+  it("preserves published metadata and repoints admitted latest within its release stage and ceiling", () => {
     // This order and release-stage membership define the model without semver calls.
     const versions = [
       "1.0.0",
@@ -306,6 +291,11 @@ describe("admittedPool", () => {
               ...(latest === null ? {} : { latest }),
               deprecated,
               publishedAt,
+            });
+            expect(publishedPool(metadata)).toEqual({
+              versions: ordered,
+              latest,
+              deprecated: new Set(deprecated),
             });
             expect(admittedPool(metadata, active, "pkg")).toEqual({
               versions: ordered.filter((version) => mature.includes(version)),
