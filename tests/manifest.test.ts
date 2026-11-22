@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { stringify } from "yaml";
 import {
   buildWorkspaceDirectDeps,
   MalformedManifestError,
@@ -122,32 +123,39 @@ describe("parsePackageJsonOverrides", () => {
 });
 
 describe("parseWorkspaceOverrides", () => {
-  it("collects entries from workspace overrides field", () => {
-    const content = `overrides:
-  '@xmldom/xmldom': '>=0.9.10'
-  postcss: '>=8.5.10'
-`;
-    expect(parseWorkspaceOverrides(content, "pnpm-workspace.yaml")).toEqual([
-      {
-        key: "@xmldom/xmldom",
-        spec: ">=0.9.10",
-        source: "pnpm-workspace.yaml",
-      },
-      {
-        key: "postcss",
-        spec: ">=8.5.10",
-        source: "pnpm-workspace.yaml",
-      },
-    ]);
-  });
-
-  it("records aube-workspace.yaml as the source when given", () => {
-    const content = `overrides:
-  foo: '>=1.0.0'
-`;
-    expect(parseWorkspaceOverrides(content, "aube-workspace.yaml")).toEqual([
-      { key: "foo", spec: ">=1.0.0", source: "aube-workspace.yaml" },
-    ]);
+  it("preserves selected overrides and their workspace source across document layouts", () => {
+    const entries = [
+      ["foo", ">=1.2.3"],
+      ["@scope/pkg", "catalog:shared"],
+      ["parent@^1>child", ">=2.0.0"],
+      ["empty", ""],
+    ] as const;
+    for (let mask = 0; mask < 2 ** entries.length; mask++) {
+      const selected = entries.filter(
+        (_, index) => (mask & (1 << index)) !== 0,
+      );
+      const fields = [
+        ["packages", ["apps/*"]],
+        ["overrides", Object.fromEntries(selected)],
+        ["catalog", { "catalog-only": "^99.0.0" }],
+        ["custom", { overrides: { "custom-only": ">=99.0.0" } }],
+      ] as const;
+      for (const source of [
+        "pnpm-workspace.yaml",
+        "aube-workspace.yaml",
+      ] as const) {
+        const expected = selected.map(([key, spec]) => ({ key, spec, source }));
+        for (const ordered of [fields, fields.toReversed()]) {
+          const document = Object.fromEntries(ordered);
+          for (const content of [
+            stringify(document),
+            JSON.stringify(document),
+          ]) {
+            expect(parseWorkspaceOverrides(content, source)).toEqual(expected);
+          }
+        }
+      }
+    }
   });
 
   it("returns empty array when overrides field is absent", () => {
