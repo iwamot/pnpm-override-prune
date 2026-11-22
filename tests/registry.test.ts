@@ -1,31 +1,33 @@
 import { describe, expect, it } from "bun:test";
 import {
   MalformedRegistryResponseError,
-  PACKUMENT_ACCEPT,
   type PackageVersionMeta,
   parsePackageMetadata,
   requestHeaders,
 } from "../src/registry.ts";
 
 describe("requestHeaders", () => {
-  it("asks for the abbreviated packument with full-document fallbacks", () => {
-    expect(requestHeaders(null)).toEqual({
-      accept:
-        "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*",
-    });
-  });
-
-  it("adds the authorization header when credentials are configured", () => {
-    expect(requestHeaders("Bearer tok")).toEqual({
-      accept: PACKUMENT_ACCEPT.abbreviated,
-      authorization: "Bearer tok",
-    });
-  });
-
-  it("asks for plain JSON when the full packument is wanted", () => {
-    expect(requestHeaders(null, "full")).toEqual({
-      accept: "application/json",
-    });
+  it("selects the document format independently of authorization and defaults to abbreviated", () => {
+    const abbreviated =
+      "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*";
+    const formats = [
+      [undefined, abbreviated],
+      ["abbreviated", abbreviated],
+      ["full", "application/json"],
+    ] as const;
+    const credentials = [
+      [null, {}],
+      ["Bearer tok", { authorization: "Bearer tok" }],
+      ["Basic dXNlcjpwYXNz", { authorization: "Basic dXNlcjpwYXNz" }],
+    ] as const;
+    for (const [form, accept] of formats) {
+      for (const [authorization, authHeaders] of credentials) {
+        expect(requestHeaders(authorization, form)).toEqual({
+          accept,
+          ...authHeaders,
+        });
+      }
+    }
   });
 });
 
