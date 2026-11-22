@@ -1,5 +1,4 @@
 import { describe, expect, it } from "bun:test";
-import { Range } from "semver";
 import {
   categorize,
   classify,
@@ -124,40 +123,39 @@ describe("hasProtocolPrefix", () => {
 });
 
 describe("categorize", () => {
-  it("targets a pure lower bound on a flat key with no selector", () => {
-    expect(categorize("foo", ">=1.0.0")).toEqual({
-      kind: "target",
-      name: "foo",
-      selector: null,
-      spec: ">=1.0.0",
-    });
-  });
-
-  it("targets a versioned key with parseable selector", () => {
-    const result = categorize("lodash@<4.17.21", ">=4.17.21");
-    expect(result.kind).toBe("target");
-    if (result.kind === "target") {
-      expect(result.name).toBe("lodash");
-      expect(result.spec).toBe(">=4.17.21");
-      expect(result.selector?.range).toBe(new Range("<4.17.21").range);
-    }
-  });
-
-  it("targets a scoped versioned key", () => {
-    const result = categorize("@azure/core-rest-pipeline@^1.0.0", ">=1.14.0");
-    expect(result.kind).toBe("target");
-    if (result.kind === "target") {
-      expect(result.name).toBe("@azure/core-rest-pipeline");
-      expect(result.selector?.range).toBe(new Range("^1.0.0").range);
-    }
-  });
-
-  it("targets a versioned key with compound selector", () => {
-    const result = categorize("lodash@>=4.0.0 <=4.17.22", ">=4.17.23");
-    expect(result.kind).toBe("target");
-    if (result.kind === "target") {
-      expect(result.name).toBe("lodash");
-      expect(result.selector?.range).toBe(new Range(">=4.0.0 <=4.17.22").range);
+  it("preserves package names, selectors, and lower bounds in every target combination", () => {
+    const selectors = [
+      [null, null],
+      ["<4.17.21", "<4.17.21"],
+      ["^1.0.0", ">=1.0.0 <2.0.0-0"],
+      [">=4.0.0 <=4.17.22", ">=4.0.0 <=4.17.22"],
+      ["> 2.0.0", ">2.0.0"],
+      ["1.0.0 || >=3.0.0", "1.0.0||>=3.0.0"],
+    ] as const;
+    for (const name of ["foo", "lodash", "@azure/core-rest-pipeline"]) {
+      for (const [raw, range] of selectors) {
+        const key = raw === null ? name : `${name}@${raw}`;
+        for (const spec of [
+          ">=1.0.0",
+          ">1.14.0",
+          ">=4.17.23",
+          ">=1.0.0 || >2.0.0",
+        ]) {
+          const result = categorize(key, spec);
+          expect(result.kind).toBe("target");
+          if (result.kind === "target") {
+            expect({
+              ...result,
+              selector: result.selector?.range ?? null,
+            }).toEqual({
+              kind: "target",
+              name,
+              selector: range,
+              spec,
+            });
+          }
+        }
+      }
     }
   });
 
