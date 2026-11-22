@@ -14,14 +14,6 @@ function only(
   return new Map([[container, keys]]);
 }
 
-function pnpm(keys: readonly string[]) {
-  return only("package.json:pnpm.overrides", keys);
-}
-
-function topLevel(keys: readonly string[]) {
-  return only("package.json:overrides", keys);
-}
-
 describe("removeFromPackageJson", () => {
   it("preserves unselected data and layout for every removal subset", () => {
     const base = {
@@ -104,6 +96,7 @@ describe("removeFromPackageJson", () => {
             expect(after.endsWith("\n")).toBe(newline === "\n");
             expect(removeFromPackageJson(after, removal)).toBe(after);
             if (selected.length === 0) {
+              expect(removeFromPackageJson(before, new Map())).toBe(before);
               expect(after).toBe(before);
             } else {
               const spacing =
@@ -119,83 +112,76 @@ describe("removeFromPackageJson", () => {
     }
   });
 
-  it("removes from both containers in a single call", () => {
-    const before = `{
-  "pnpm": { "overrides": { "a": "1", "b": "2" } },
-  "overrides": { "c": "3", "d": "4" }
-}
-`;
-    const after = removeFromPackageJson(
-      before,
-      new Map([
-        ["package.json:pnpm.overrides", ["a"]],
-        ["package.json:overrides", ["d"]],
-      ]),
-    );
-    const parsed = JSON.parse(after) as Record<string, unknown>;
-    const pnpmField = parsed.pnpm as Record<string, unknown>;
-    expect(Object.keys(pnpmField.overrides as Record<string, unknown>)).toEqual(
-      ["b"],
-    );
-    expect(Object.keys(parsed.overrides as Record<string, unknown>)).toEqual([
-      "c",
-    ]);
+  it("removes independently from every combination of JSON containers in one call", () => {
+    const containers = [
+      "package.json:pnpm.overrides",
+      "package.json:aube.overrides",
+      "package.json:overrides",
+      "package.json:resolutions",
+    ] as const;
+    const before = JSON.stringify({
+      pnpm: { overrides: { a: "1", b: "2" } },
+      aube: { overrides: { c: "3", d: "4" } },
+      overrides: { e: "5", f: "6" },
+      resolutions: { g: "7", h: "8" },
+      custom: { a: "keep" },
+    });
+    for (let mask = 0; mask < 2 ** containers.length; mask++) {
+      const keys = ["a", "d", "f", "g"] as const;
+      const removals = containers.map(
+        (container, index) =>
+          [
+            container,
+            (mask & (1 << index)) !== 0 ? [keys[index]!] : [],
+          ] as const,
+      );
+      const expected = {
+        pnpm: { overrides: (mask & 1) !== 0 ? { b: "2" } : { a: "1", b: "2" } },
+        aube: { overrides: (mask & 2) !== 0 ? { c: "3" } : { c: "3", d: "4" } },
+        overrides: (mask & 4) !== 0 ? { e: "5" } : { e: "5", f: "6" },
+        resolutions: (mask & 8) !== 0 ? { h: "8" } : { g: "7", h: "8" },
+        custom: { a: "keep" },
+      };
+      for (const ordered of [removals, removals.toReversed()]) {
+        expect(
+          JSON.parse(removeFromPackageJson(before, new Map(ordered))),
+        ).toEqual(expected);
+      }
+    }
   });
 
-  it("returns content unchanged when every removal list is empty", () => {
-    const before = `{"pnpm":{"overrides":{"foo":">=1.0.0"}}}`;
-    expect(
-      removeFromPackageJson(
-        before,
-        new Map([
-          ["package.json:pnpm.overrides", []],
-          ["package.json:overrides", []],
-        ]),
-      ),
-    ).toBe(before);
-    expect(removeFromPackageJson(before, new Map())).toBe(before);
-  });
-
-  it("returns content unchanged when resolutions is absent", () => {
-    const before = `{"name":"x"}`;
-    expect(
-      removeFromPackageJson(before, only("package.json:resolutions", ["foo"])),
-    ).toBe(before);
-  });
-
-  it("returns content unchanged when pnpm field is absent", () => {
-    const before = `{"name":"x"}`;
-    expect(removeFromPackageJson(before, pnpm(["foo"]))).toBe(before);
-  });
-
-  it("returns content unchanged when pnpm field is not a mapping", () => {
-    const before = `{"pnpm":"oops"}`;
-    expect(removeFromPackageJson(before, pnpm(["foo"]))).toBe(before);
-  });
-
-  it("returns content unchanged when pnpm.overrides is absent", () => {
-    const before = `{"pnpm":{}}`;
-    expect(removeFromPackageJson(before, pnpm(["foo"]))).toBe(before);
-  });
-
-  it("returns content unchanged when pnpm.overrides is not a mapping", () => {
-    const before = `{"pnpm":{"overrides":"oops"}}`;
-    expect(removeFromPackageJson(before, pnpm(["foo"]))).toBe(before);
-  });
-
-  it("returns content unchanged when top-level overrides is absent", () => {
-    const before = `{"name":"x"}`;
-    expect(removeFromPackageJson(before, topLevel(["foo"]))).toBe(before);
-  });
-
-  it("returns content unchanged when top-level overrides is not a mapping", () => {
-    const before = `{"overrides":"oops"}`;
-    expect(removeFromPackageJson(before, topLevel(["foo"]))).toBe(before);
-  });
-
-  it("returns content unchanged when root is not an object", () => {
-    const before = `[1,2,3]`;
-    expect(removeFromPackageJson(before, pnpm(["foo"]))).toBe(before);
+  it("preserves the exact JSON bytes when the requested container cannot be rewritten", () => {
+    const nonMappings = [null, [], ["array-entry"], 42, "oops", true];
+    const documents: unknown[] = [...nonMappings];
+    for (const value of [undefined, ...nonMappings]) {
+      documents.push(
+        ...[
+          { overrides: value },
+          { pnpm: value },
+          { pnpm: { overrides: value } },
+          { aube: value },
+          { aube: { overrides: value } },
+          { resolutions: value },
+        ],
+      );
+    }
+    for (const document of documents) {
+      for (const indent of [undefined, 2, "\t"]) {
+        for (const newline of ["", "\n"]) {
+          const before = JSON.stringify(document, null, indent) + newline;
+          for (const container of [
+            "package.json:pnpm.overrides",
+            "package.json:aube.overrides",
+            "package.json:overrides",
+            "package.json:resolutions",
+          ] as const) {
+            expect(
+              removeFromPackageJson(before, only(container, ["foo"])),
+            ).toBe(before);
+          }
+        }
+      }
+    }
   });
 });
 
@@ -261,9 +247,23 @@ describe("removeFromWorkspaceYaml", () => {
     }
   });
 
-  it("returns content (re-emitted) when overrides field is absent", () => {
-    const before = "minimumReleaseAge: 1440\n";
-    const after = removeFromWorkspaceYaml(before, ["foo"]);
-    expect(after).toContain("minimumReleaseAge: 1440");
+  it("preserves exact YAML bytes when overrides are absent or not a mapping", () => {
+    for (const overrides of [
+      "",
+      "overrides: oops\n",
+      "overrides: []\n",
+      "overrides: null\n",
+      "overrides: 42\n",
+    ]) {
+      for (const newline of ["\n", "\r\n"]) {
+        const before = (
+          "# workspace settings\nminimumReleaseAge: 1440\n" + overrides
+        ).replaceAll("\n", newline);
+        expect(removeFromWorkspaceYaml(before, ["foo", "@scope/pkg"])).toBe(
+          before,
+        );
+        expect(removeFromWorkspaceYaml(before, [])).toBe(before);
+      }
+    }
   });
 });
