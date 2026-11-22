@@ -359,102 +359,6 @@ describe("evaluateOverride", () => {
     expect(result).toEqual({ status: "error", value: "(registry miss)" });
   });
 
-  it("prunes when natural resolution satisfies the override floor", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        foo: [{ parent: "parentA@1.0.0", resolved: "2.5.0" }],
-      },
-    });
-    const registry = new Map<string, PackageMetadata>([
-      ["parentA", makeMetadata("parentA", { "1.0.0": { foo: ">=2.0.0" } })],
-      [
-        "foo",
-        makeMetadata("foo", {
-          "1.0.0": {},
-          "2.0.0": {},
-          "2.5.0": {},
-        }),
-      ],
-    ]);
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=2.0.0"),
-      lockfile,
-      NO_DIRECT,
-      registry,
-    );
-    expect(result).toEqual({ status: "prune", value: "2.5.0" });
-  });
-
-  it("keeps when natural resolution falls below the override floor", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        foo: [{ parent: "parentA@1.0.0", resolved: "1.5.0" }],
-      },
-    });
-    const registry = new Map<string, PackageMetadata>([
-      ["parentA", makeMetadata("parentA", { "1.0.0": { foo: "^1.0.0" } })],
-      [
-        "foo",
-        makeMetadata("foo", {
-          "1.0.0": {},
-          "1.5.0": {},
-          "2.0.0": {},
-        }),
-      ],
-    ]);
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=2.0.0"),
-      lockfile,
-      NO_DIRECT,
-      registry,
-    );
-    expect(result).toEqual({ status: "keep", value: "1.5.0" });
-  });
-
-  it("uses workspace direct dep spec to evaluate the override floor", () => {
-    const lockfile = makeLockfile({});
-    const direct = makeWorkspaceDirectDeps({ foo: "^2.0.0" });
-    const registry = new Map<string, PackageMetadata>([
-      [
-        "foo",
-        makeMetadata("foo", {
-          "1.0.0": {},
-          "2.0.0": {},
-          "2.5.0": {},
-        }),
-      ],
-    ]);
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=2.0.0"),
-      lockfile,
-      direct,
-      registry,
-    );
-    expect(result).toEqual({ status: "prune", value: "2.5.0" });
-  });
-
-  it("keeps when workspace direct dep spec resolves below the override floor", () => {
-    const lockfile = makeLockfile({});
-    const direct = makeWorkspaceDirectDeps({ foo: "1.0.0" });
-    const registry = new Map<string, PackageMetadata>([
-      [
-        "foo",
-        makeMetadata("foo", {
-          "1.0.0": {},
-          "1.5.0": {},
-          "2.0.0": {},
-        }),
-      ],
-    ]);
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=2.0.0"),
-      lockfile,
-      direct,
-      registry,
-    );
-    expect(result).toEqual({ status: "keep", value: "1.0.0" });
-  });
-
   it("keeps protocol-constrained overrides for review and lists each protocol once in encounter order", () => {
     const protocols = [
       ["catalog:default", "catalog:"],
@@ -542,7 +446,7 @@ describe("evaluateOverride", () => {
     expect(result).toEqual({ status: "skip", value: "(unsupported selector)" });
   });
 
-  it("uses selectors to choose constraints and compares their natural resolution with each override floor", () => {
+  it("compares natural resolution with override floors for flat and selector-qualified keys", () => {
     const versions = ["1.0.0", "1.5.0", "2.0.0", "2.5.0"];
     const requirements = [
       { spec: "^1.0.0", rank: 1 },
@@ -551,6 +455,7 @@ describe("evaluateOverride", () => {
     ];
     // Range intersections are specified independently of semver.intersects.
     const selectors = [
+      [null, [0, 1, 2]],
       ["<1.2.0", [0, 2]],
       [">=1.2.0 <2.0.0", [0]],
       ["^2.0.0", [1]],
@@ -626,7 +531,10 @@ describe("evaluateOverride", () => {
                   };
             expect(
               evaluateOverride(
-                PKG_OVERRIDE(`foo@${selector}`, spec),
+                PKG_OVERRIDE(
+                  selector === null ? "foo" : `foo@${selector}`,
+                  spec,
+                ),
                 lockfile,
                 direct,
                 registry,
