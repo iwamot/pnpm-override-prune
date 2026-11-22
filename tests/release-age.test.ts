@@ -82,15 +82,6 @@ describe("createReleasePolicy", () => {
 });
 
 describe("eligibleVersions", () => {
-  const dated = meta({
-    versions: ["1.0.0", "1.1.0", "1.2.0"],
-    publishedAt: {
-      "1.0.0": "2026-09-01T00:00:00Z",
-      "1.1.0": "2026-09-21T12:00:00Z",
-      "1.2.0": "2026-09-22T11:00:00Z",
-    },
-  });
-
   it("keeps exactly the dated versions old enough at any policy duration and time origin", () => {
     const versions = ["1.0.0", "1.1.0", "1.2.0", "1.3.0"];
     for (const now of [new Date(0), NOW]) {
@@ -123,43 +114,74 @@ describe("eligibleVersions", () => {
     }
   });
 
-  it("exempts a package named in the exclude list", () => {
-    expect(eligibleVersions(dated, policy(1440, ["pkg"]), "pkg")).toHaveLength(
-      3,
-    );
-    expect(
-      eligibleVersions(dated, policy(1440, ["other"]), "pkg"),
-    ).toHaveLength(2);
-  });
-
-  it("matches exclude patterns with wildcards", () => {
-    expect(eligibleVersions(dated, policy(1440, ["p*"]), "pkg")).toHaveLength(
-      3,
-    );
-    expect(
-      eligibleVersions(dated, policy(1440, ["@myorg/*"]), "@myorg/pkg"),
-    ).toHaveLength(3);
-    expect(
-      eligibleVersions(dated, policy(1440, ["@myorg/*"]), "@other/pkg"),
-    ).toHaveLength(2);
-    expect(eligibleVersions(dated, policy(1440, ["p.g"]), "pkg")).toHaveLength(
-      2,
-    );
-  });
-
-  it("exempts only the listed versions of a version union", () => {
-    expect(
-      eligibleVersions(dated, policy(1440, ["pkg@1.2.0 || 0.9.0"]), "pkg"),
-    ).toEqual(["1.0.0", "1.1.0", "1.2.0"]);
-    expect(eligibleVersions(dated, policy(1440, ["pkg@0.9.0"]), "pkg")).toEqual(
-      ["1.0.0", "1.1.0"],
-    );
-  });
-
-  it("lets a whole-package rule win over a version rule", () => {
-    expect(
-      eligibleVersions(dated, policy(1440, ["pkg@0.9.0", "pkg"]), "pkg"),
-    ).toHaveLength(3);
+  it("admits the union of matching exclusions regardless of rule order or repetition", () => {
+    const versions = ["1.0.0", "1.1.0", "1.2.0"];
+    const rules = [
+      { pattern: "pkg", names: ["pkg"], versions },
+      { pattern: "p*", names: ["pkg", "pkg-extra", "p.g"], versions },
+      { pattern: "@myorg/*", names: ["@myorg/pkg"], versions },
+      { pattern: "p.g", names: ["p.g"], versions },
+      {
+        pattern: "pkg@1.2.0 || 1.1.0 || 0.9.0",
+        names: ["pkg"],
+        versions: ["1.2.0", "1.1.0", "0.9.0"],
+      },
+      { pattern: "pkg@1.0.0", names: ["pkg"], versions: ["1.0.0"] },
+      {
+        pattern: "@myorg/pkg@1.1.0",
+        names: ["@myorg/pkg"],
+        versions: ["1.1.0"],
+      },
+    ];
+    const names = [
+      "pkg",
+      "pkg-extra",
+      "p.g",
+      "@myorg/pkg",
+      "@other/pkg",
+      "other",
+      "x-pkg",
+    ];
+    for (let mask = 0; mask < 2 ** rules.length; mask++) {
+      const selected = rules.filter((_, index) => (mask & (1 << index)) !== 0);
+      for (const mature of [[], ["1.0.0"]]) {
+        const metadata = meta({
+          versions,
+          publishedAt: Object.fromEntries(
+            versions.map(
+              (version) =>
+                [
+                  version,
+                  mature.includes(version)
+                    ? "2026-09-01T00:00:00Z"
+                    : "2026-09-22T11:00:00Z",
+                ] as const,
+            ),
+          ),
+        });
+        for (const ordered of [
+          selected,
+          selected.toReversed().concat(selected),
+        ]) {
+          const active = policy(
+            1440,
+            ordered.map(({ pattern }) => pattern),
+          );
+          for (const name of names) {
+            // The finite membership table defines exemptions without regex or semver calls.
+            const admitted = new Set([
+              ...mature,
+              ...selected
+                .filter((rule) => rule.names.includes(name))
+                .flatMap((rule) => rule.versions),
+            ]);
+            expect(eligibleVersions(metadata, active, name)).toEqual(
+              versions.filter((version) => admitted.has(version)),
+            );
+          }
+        }
+      }
+    }
   });
 });
 
