@@ -17,62 +17,52 @@ function pool(
 }
 
 describe("computeNaturalResolution", () => {
-  it("returns the lowest of per-spec max-satisfying versions", () => {
-    expect(
-      computeNaturalResolution(
-        [">=1.0.0", "<3.0.0"],
-        pool(["0.5.0", "1.5.0", "2.0.0", "3.5.0"]),
-      ),
-    ).toBe("2.0.0");
-  });
-
-  it("returns the lowest when caret and tilde ranges disagree", () => {
-    expect(
-      computeNaturalResolution(
-        ["^1.2.3", "~1.5.0"],
-        pool(["1.4.0", "1.5.5", "1.5.9", "1.6.0", "2.0.0"]),
-      ),
-    ).toBe("1.5.9");
-  });
-
-  it("returns the lowest version when exact pins disagree", () => {
-    // Specs '1.19.0' and '1.19.11' can't be hoisted to a single version.
-    // pnpm would install both; the worst case for any consumer is 1.19.0.
-    expect(
-      computeNaturalResolution(
-        ["1.19.0", "1.19.11"],
-        pool(["1.19.0", "1.19.11", "1.19.13"]),
-      ),
-    ).toBe("1.19.0");
-  });
-
-  it("returns null when no parent specs are given", () => {
-    expect(computeNaturalResolution([], pool(["1.0.0", "2.0.0"]))).toBeNull();
-  });
-
-  it("returns null when no candidate versions are given", () => {
-    expect(computeNaturalResolution([">=1.0.0"], pool([]))).toBeNull();
-  });
-
-  it("returns null when no candidate satisfies any spec", () => {
-    expect(
-      computeNaturalResolution([">=10.0.0"], pool(["1.0.0", "2.0.0"])),
-    ).toBeNull();
-  });
-
-  it("skips specs that have no satisfying candidate but uses the rest", () => {
-    expect(
-      computeNaturalResolution(
-        [">=10.0.0", "^1.0.0"],
-        pool(["1.0.0", "1.5.0", "2.0.0"]),
-      ),
-    ).toBe("1.5.0");
-  });
-
-  it("handles a single spec correctly", () => {
-    expect(
-      computeNaturalResolution([">=1.0.0"], pool(["0.5.0", "1.0.0", "1.5.0"])),
-    ).toBe("1.5.0");
+  it("resolves every parent against admitted versions before falling back to published versions", () => {
+    const versions = ["1.2.3", "1.5.9", "1.6.0", "2.0.0", "10.0.0"];
+    // Membership in this finite version domain is independent of semver parsing.
+    const requirements = [
+      { spec: ">=1.2.3", members: [0, 1, 2, 3, 4] },
+      { spec: "<2.0.0", members: [0, 1, 2] },
+      { spec: "^1.2.3", members: [0, 1, 2] },
+      { spec: "~1.5.0", members: [1] },
+      { spec: "2.0.0", members: [3] },
+      { spec: ">=20.0.0", members: [] },
+    ];
+    // Each published version is either absent, fallback-only, or admitted.
+    for (let inventory = 0; inventory < 3 ** versions.length; inventory++) {
+      const availability = versions.map(
+        (_, index) => Math.floor(inventory / 3 ** index) % 3,
+      );
+      const admitted = pool(
+        versions.filter((_, index) => availability[index] === 2),
+      );
+      const published = pool(
+        versions.filter((_, index) => availability[index] !== 0),
+      );
+      for (let mask = 0; mask < 2 ** requirements.length; mask++) {
+        const parents = requirements.filter(
+          (_, index) => (mask & (1 << index)) !== 0,
+        );
+        const ranks = parents.flatMap(({ members }) => {
+          const rank =
+            members.findLast((index) => availability[index] === 2) ??
+            members.findLast((index) => availability[index] === 1);
+          return rank === undefined ? [] : [rank];
+        });
+        const expected = versions[Math.min(...ranks)] ?? null;
+        const specs = parents.map(({ spec }) => spec);
+        expect(computeNaturalResolution(specs, admitted, published)).toBe(
+          expected,
+        );
+        expect(
+          computeNaturalResolution(
+            [...specs].reverse().concat(specs),
+            admitted,
+            published,
+          ),
+        ).toBe(expected);
+      }
+    }
   });
 
   it("ignores pre-release versions when ranges are stable", () => {
@@ -99,28 +89,6 @@ describe("computeNaturalResolution", () => {
     expect(
       computeNaturalResolution(["not-a-spec"], pool(["1.0.0", "2.0.0"])),
     ).toBeNull();
-  });
-
-  it("falls back to all versions for a spec no candidate satisfies", () => {
-    const candidates = ["1.0.0", "1.1.0"];
-    const all = ["1.0.0", "1.1.0", "1.2.0", "2.0.0"];
-    expect(
-      computeNaturalResolution(["^1.0.0"], pool(candidates), pool(all)),
-    ).toBe("1.1.0");
-    expect(
-      computeNaturalResolution(["^2.0.0"], pool(candidates), pool(all)),
-    ).toBe("2.0.0");
-    expect(
-      computeNaturalResolution(
-        ["^1.0.0", "^2.0.0"],
-        pool(candidates),
-        pool(all),
-      ),
-    ).toBe("1.1.0");
-  });
-
-  it("returns null with no versions at all", () => {
-    expect(computeNaturalResolution(["^1.0.0"], pool([]), pool([]))).toBeNull();
   });
 });
 
