@@ -61,23 +61,68 @@ describe("parsePackageMetadata", () => {
     expect(meta.publishedAt).toBeNull();
   });
 
-  it("reads publish times from the full packument's time field", () => {
-    const raw = {
-      name: "pkg",
-      time: {
-        created: "2020-01-01T00:00:00.000Z",
-        modified: "2026-09-22T00:56:58.317Z",
-        "1.0.0": "2020-01-01T00:00:00.000Z",
-        "1.1.0": "not a date",
-        "9.9.9": "2026-01-01T00:00:00.000Z",
-      },
-      versions: { "1.0.0": {}, "1.1.0": {}, "1.2.0": {} },
-    };
-    const meta = parsePackageMetadata(raw, "pkg");
-    expect(meta.publishedAt).toEqual(
-      new Map([["1.0.0", new Date("2020-01-01T00:00:00.000Z")]]),
-    );
-    expect(meta.modified).toBeNull();
+  it("associates valid publish times only with present versions independently of modification time", () => {
+    const versions = ["1.0.0", "1.1.0", "1.2.0"];
+    const timestamps = [
+      [undefined, null],
+      ["soon", null],
+      [{}, []],
+      [
+        {
+          created: "2020-01-01T00:00:00.000Z",
+          modified: "2026-09-22T00:56:58.317Z",
+          "1.0.0": "2020-01-01T00:00:00.000Z",
+          "1.1.0": "not a date",
+          "1.2.0": "2024-02-03T04:05:06+09:00",
+          "9.9.9": "2026-01-01T00:00:00.000Z",
+        },
+        [
+          ["1.0.0", Date.UTC(2020, 0, 1)],
+          ["1.2.0", Date.UTC(2024, 1, 2, 19, 5, 6)],
+        ],
+      ],
+    ] as const;
+    const modifications = [
+      [undefined, null],
+      [12, null],
+      ["2025-03-28T20:39:22.000Z", Date.UTC(2025, 2, 28, 20, 39, 22)],
+    ] as const;
+    for (let mask = 0; mask < 2 ** versions.length; mask++) {
+      const selected = versions.filter(
+        (_, index) => (mask & (1 << index)) !== 0,
+      );
+      for (const ordered of [selected, selected.toReversed()]) {
+        for (const [time, published] of timestamps) {
+          for (const [modified, epoch] of modifications) {
+            const meta = parsePackageMetadata(
+              {
+                versions: Object.fromEntries(
+                  ordered.map((version) => [version, {}] as const),
+                ),
+                time,
+                modified,
+              },
+              "pkg",
+            );
+            expect(meta.publishedAt).toEqual(
+              published === null
+                ? null
+                : new Map(
+                    published
+                      .filter(([version]) => selected.includes(version))
+                      .map(
+                        ([version, milliseconds]) =>
+                          [version, new Date(milliseconds)] as const,
+                      ),
+                  ),
+            );
+            expect(meta.modified).toEqual(
+              epoch === null ? null : new Date(epoch),
+            );
+          }
+        }
+      }
+    }
   });
 
   it("flags deprecated versions and ignores a latest tag that names no version", () => {
@@ -93,15 +138,6 @@ describe("parsePackageMetadata", () => {
     expect(meta.versions.get("2.0.0")?.deprecated).toBe(false);
     expect(meta.latest).toBeNull();
     expect(parsePackageMetadata({ versions: {} }, "pkg").latest).toBeNull();
-  });
-
-  it("reports no publish times when the time field is absent or malformed", () => {
-    expect(
-      parsePackageMetadata({ versions: {}, time: "soon" }, "pkg").publishedAt,
-    ).toBeNull();
-    expect(
-      parsePackageMetadata({ versions: {}, modified: 12 }, "pkg").modified,
-    ).toBeNull();
   });
 
   it("merges every dependency inventory with normal, peer, then optional priority per version", () => {
