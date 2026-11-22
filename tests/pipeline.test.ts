@@ -277,45 +277,68 @@ describe("evaluateOverride", () => {
     expect(result).toEqual({ status: "prune", value: "(unused)" });
   });
 
-  it("returns error, not prune, when a parent fetch failed", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        foo: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
-      },
-    });
-    const registry = new Map<string, PackageMetadata | null>([
-      ["parentA", null],
-      ["foo", makeMetadata("foo", { "1.0.0": {}, "1.2.0": {} })],
-    ]);
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=1.0.0"),
-      lockfile,
-      NO_DIRECT,
-      registry,
-    );
-    expect(result).toEqual({
-      status: "error",
-      value: "(fetch failed: parentA)",
-    });
-  });
-
-  it("returns error when the target fetch failed", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        foo: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
-      },
-    });
-    const registry = new Map<string, PackageMetadata | null>([
-      ["parentA", makeMetadata("parentA", { "1.0.0": { foo: "^1.0.0" } })],
-      ["foo", null],
-    ]);
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=1.0.0"),
-      lockfile,
-      NO_DIRECT,
-      registry,
-    );
-    expect(result).toEqual({ status: "error", value: "(fetch failed: foo)" });
+  it("reports every relevant fetch failure before issuing a verdict and ignores unrelated failures", () => {
+    const parents = ["parentA", "@scope/parentB"];
+    const contexts = [
+      [null, NO_DIRECT, { status: "prune", value: "(unused)" }],
+      ["^1.0.0", NO_DIRECT, { status: "prune", value: "1.2.0" }],
+      [
+        "^1.0.0",
+        makeWorkspaceDirectDeps({ foo: "workspace:*" }),
+        { status: "skip", value: "(constrained by workspace: spec)" },
+      ],
+    ] as const;
+    for (let mask = 0; mask < 8; mask++) {
+      const failedNames = new Set(
+        ["foo", ...parents].filter((_, index) => (mask & (1 << index)) !== 0),
+      );
+      for (const ordered of [parents, parents.toReversed()]) {
+        const lockfile = makeLockfile({
+          transitive: {
+            foo: ordered.map((name) => ({
+              parent: `${name}@1.0.0`,
+              resolved: "1.0.0",
+            })),
+          },
+        });
+        for (const [parentSpec, direct, verdict] of contexts) {
+          const registry = new Map<string, PackageMetadata | null>([
+            ["foo", makeMetadata("foo", { "1.0.0": {}, "1.2.0": {} })],
+            ...parents.map(
+              (name) =>
+                [
+                  name,
+                  makeMetadata(name, {
+                    "1.0.0": parentSpec === null ? {} : { foo: parentSpec },
+                  }),
+                ] as const,
+            ),
+            ["unrelated", null],
+          ]);
+          for (const name of failedNames) {
+            registry.set(name, null);
+          }
+          const failures = ["foo", ...ordered].filter((name) =>
+            failedNames.has(name),
+          );
+          const expected =
+            failures.length === 0
+              ? verdict
+              : {
+                  status: "error" as const,
+                  value: `(fetch failed: ${failures.join(", ")})`,
+                };
+          expect(
+            evaluateOverride(
+              PKG_OVERRIDE("foo", ">=1.0.0"),
+              lockfile,
+              direct,
+              registry,
+            ),
+          ).toEqual(expected);
+        }
+      }
+    }
   });
 
   it("returns error when target has no registry metadata", () => {
