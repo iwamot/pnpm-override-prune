@@ -33,15 +33,20 @@ describe("retryDelay", () => {
 });
 
 describe("failureMessage", () => {
-  it("names the package and the cause", () => {
-    expect(failureMessage("lodash", "HTTP 401", 1)).toBe(
-      "failed to fetch 'lodash' from registry: HTTP 401",
-    );
-  });
-
-  it("counts the attempts when the failure survived retries", () => {
-    expect(failureMessage("lodash", "HTTP 503", 3)).toBe(
-      "failed to fetch 'lodash' from registry: HTTP 503 (after 3 attempts)",
-    );
+  it("preserves package and cause text independently of the attempt-count suffix", () => {
+    const suffixes = [
+      [1, ""],
+      [2, " (after 2 attempts)"],
+      [3, " (after 3 attempts)"],
+    ] as const;
+    for (const name of ["lodash", "@scope/pkg", "with-dash"]) {
+      for (const detail of ["HTTP 401", "HTTP 503", "network error: 日本語"]) {
+        for (const [attempts, suffix] of suffixes) {
+          expect(failureMessage(name, detail, attempts)).toBe(
+            `failed to fetch '${name}' from registry: ${detail}${suffix}`,
+          );
+        }
+      }
+    }
   });
 });
