@@ -85,23 +85,30 @@ describe("formatSectionHeader", () => {
 });
 
 describe("formatLine", () => {
-  it("renders label, padded display, and value", () => {
-    const entry: AuditEntry = {
-      override: PKG("foo", ">=1.0.0"),
-      result: { status: "prune", value: "1.5.0" },
-    };
-    expect(formatLine(entry, 20)).toBe("[PRUNE] foo >=1.0.0           1.5.0\n");
-  });
-
-  it("uses the appropriate label for each status", () => {
-    const make = (status: "prune" | "keep" | "skip" | "error"): AuditEntry => ({
-      override: PKG("foo", ">=1.0.0"),
-      result: { status, value: "x" },
-    });
-    expect(formatLine(make("prune"), 11)).toContain("[PRUNE]");
-    expect(formatLine(make("keep"), 11)).toContain("[KEEP] ");
-    expect(formatLine(make("skip"), 11)).toContain("[SKIP] ");
-    expect(formatLine(make("error"), 11)).toContain("[ERROR]");
+  it("preserves result text and aligns every status at each display width", () => {
+    const labels = [
+      ["prune", "[PRUNE]"],
+      ["keep", "[KEEP] "],
+      ["skip", "[SKIP] "],
+      ["error", "[ERROR]"],
+    ] as const;
+    const columns = [
+      [11, ""],
+      [20, "         "],
+    ] as const;
+    for (const [status, label] of labels) {
+      for (const [width, padding] of columns) {
+        for (const value of ["1.5.0", "(unused)", "registry: 日本語"]) {
+          const entry: AuditEntry = {
+            override: PKG("foo", ">=1.0.0"),
+            result: { status, value },
+          };
+          expect(formatLine(entry, width)).toBe(
+            `${label} foo >=1.0.0${padding}  ${value}\n`,
+          );
+        }
+      }
+    }
   });
 });
 
