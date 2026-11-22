@@ -91,35 +91,36 @@ describe("eligibleVersions", () => {
     },
   });
 
-  it("drops versions published after the cutoff, keeping the boundary", () => {
-    expect(eligibleVersions(dated, policy(1440), "pkg")).toEqual([
-      "1.0.0",
-      "1.1.0",
-    ]);
-  });
-
-  it("keeps everything when the check is disabled", () => {
-    expect(eligibleVersions(dated, policy(0), "pkg")).toEqual([
-      "1.0.0",
-      "1.1.0",
-      "1.2.0",
-    ]);
-  });
-
-  it("keeps everything without publish times", () => {
-    const undated = meta({ versions: ["1.0.0", "1.2.0"] });
-    expect(eligibleVersions(undated, policy(1440), "pkg")).toEqual([
-      "1.0.0",
-      "1.2.0",
-    ]);
-  });
-
-  it("drops a version the time field does not date", () => {
-    const partial = meta({
-      versions: ["1.0.0", "1.1.0"],
-      publishedAt: { "1.0.0": "2026-09-01T00:00:00Z" },
-    });
-    expect(eligibleVersions(partial, policy(1440), "pkg")).toEqual(["1.0.0"]);
+  it("keeps exactly the dated versions old enough at any policy duration and time origin", () => {
+    const versions = ["1.0.0", "1.1.0", "1.2.0", "1.3.0"];
+    for (const now of [new Date(0), NOW]) {
+      for (const minimumReleaseAge of [1, 60, 1440, 10080]) {
+        const cutoff = now.getTime() - minimumReleaseAge * 60_000;
+        const publishedAt = Object.fromEntries(
+          [-1, 0, 1].map(
+            (offset, index) =>
+              [
+                `1.${index}.0`,
+                new Date(cutoff + offset).toISOString(),
+              ] as const,
+          ),
+        );
+        const dated = meta({ versions, publishedAt });
+        const settings = { minimumReleaseAge, minimumReleaseAgeExclude: [] };
+        const active = createReleasePolicy(settings, now);
+        expect(eligibleVersions(dated, active, "pkg")).toEqual(
+          versions.slice(0, 2),
+        );
+        expect(eligibleVersions(meta({ versions }), active, "pkg")).toEqual(
+          versions,
+        );
+        const disabled = createReleasePolicy(
+          { ...settings, minimumReleaseAge: 0 },
+          now,
+        );
+        expect(eligibleVersions(dated, disabled, "pkg")).toEqual(versions);
+      }
+    }
   });
 
   it("exempts a package named in the exclude list", () => {
@@ -163,61 +164,43 @@ describe("eligibleVersions", () => {
 });
 
 describe("needsPublishTimes", () => {
-  it("is false when the check is disabled", () => {
-    const recent = meta({
-      versions: ["1.0.0"],
-      modified: "2026-09-22T11:00:00Z",
-    });
-    expect(needsPublishTimes(recent, policy(0), "pkg")).toBe(false);
-  });
-
-  it("is false when the versions are already dated", () => {
-    const dated = meta({
-      versions: ["1.0.0"],
-      modified: "2026-09-22T11:00:00Z",
-      publishedAt: { "1.0.0": "2026-09-22T11:00:00Z" },
-    });
-    expect(needsPublishTimes(dated, policy(1440), "pkg")).toBe(false);
-  });
-
-  it("is false for a package the exclude list exempts", () => {
-    const recent = meta({
-      versions: ["1.0.0"],
-      modified: "2026-09-22T11:00:00Z",
-    });
-    expect(needsPublishTimes(recent, policy(1440, ["pkg"]), "pkg")).toBe(false);
-  });
-
-  it("is true for a package the exclude list only partly exempts", () => {
-    const recent = meta({
-      versions: ["1.0.0"],
-      modified: "2026-09-22T11:00:00Z",
-    });
-    expect(needsPublishTimes(recent, policy(1440, ["pkg@1.0.0"]), "pkg")).toBe(
-      true,
-    );
-  });
-
-  it("is false when nothing changed since the cutoff", () => {
-    const stale = meta({
-      versions: ["1.0.0"],
-      modified: "2026-09-21T12:00:00Z",
-    });
-    expect(needsPublishTimes(stale, policy(1440), "pkg")).toBe(false);
-  });
-
-  it("is true when the package changed after the cutoff", () => {
-    const recent = meta({
-      versions: ["1.0.0"],
-      modified: "2026-09-21T12:00:01Z",
-    });
-    expect(needsPublishTimes(recent, policy(1440), "pkg")).toBe(true);
-  });
-
-  it("is true when the registry does not say when it changed", () => {
-    expect(
-      needsPublishTimes(meta({ versions: ["1.0.0"] }), policy(1440), "pkg"),
-    ).toBe(true);
+  it("fetches dates only when the policy needs information that local metadata cannot provide", () => {
+    const exemptions = [
+      { exclude: [], wholePackage: false },
+      { exclude: ["pkg"], wholePackage: true },
+      { exclude: ["p*"], wholePackage: true },
+      { exclude: ["other"], wholePackage: false },
+      { exclude: ["pkg@1.0.0"], wholePackage: false },
+    ];
+    for (const now of [new Date(0), NOW]) {
+      for (const minimumReleaseAge of [0, 1, 60, 1440]) {
+        const cutoff = now.getTime() - minimumReleaseAge * 60_000;
+        for (const offset of [null, -1, 0, 1]) {
+          for (const dated of [false, true]) {
+            const metadata = meta({
+              versions: ["1.0.0"],
+              ...(offset === null
+                ? {}
+                : { modified: new Date(cutoff + offset).toISOString() }),
+              ...(dated ? { publishedAt: {} } : {}),
+            });
+            for (const { exclude, wholePackage } of exemptions) {
+              const active = createReleasePolicy(
+                { minimumReleaseAge, minimumReleaseAgeExclude: exclude },
+                now,
+              );
+              const recentOrUnknown = offset === null || offset === 1;
+              expect(needsPublishTimes(metadata, active, "pkg")).toBe(
+                minimumReleaseAge !== 0 &&
+                  !dated &&
+                  !wholePackage &&
+                  recentOrUnknown,
+              );
+            }
+          }
+        }
+      }
+    }
   });
 });
 
