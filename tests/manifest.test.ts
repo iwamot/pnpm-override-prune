@@ -9,28 +9,43 @@ import {
 import { DEFAULT_RELEASE_AGE_SETTINGS } from "../src/release-age.ts";
 
 describe("parsePackageJsonOverrides", () => {
-  it("collects entries from pnpm.overrides", () => {
-    const content = JSON.stringify({
-      name: "demo",
-      pnpm: {
-        overrides: {
-          "@xmldom/xmldom": ">=0.9.10",
-          postcss: ">=8.5.10",
-        },
-      },
-    });
-    expect(parsePackageJsonOverrides(content)).toEqual([
-      {
-        key: "@xmldom/xmldom",
-        spec: ">=0.9.10",
-        source: "package.json:pnpm.overrides",
-      },
-      {
-        key: "postcss",
-        spec: ">=8.5.10",
-        source: "package.json:pnpm.overrides",
-      },
-    ]);
+  it("preserves every selected entry and its source regardless of container field order", () => {
+    const sources = [
+      "package.json:overrides",
+      "package.json:pnpm.overrides",
+      "package.json:aube.overrides",
+      "package.json:resolutions",
+    ] as const;
+    const entries = sources.flatMap((source, index) =>
+      ["foo", "@scope/pkg"].map((key, minor) => ({
+        key,
+        spec: `>=${index + 1}.${minor}.0`,
+        source,
+      })),
+    );
+    for (let mask = 0; mask < 2 ** entries.length; mask++) {
+      const expected = entries.filter(
+        (_, index) => (mask & (1 << index)) !== 0,
+      );
+      const mapping = (source: (typeof sources)[number]) =>
+        Object.fromEntries(
+          expected
+            .filter((entry) => entry.source === source)
+            .map(({ key, spec }) => [key, spec] as const),
+        );
+      const fields = [
+        ["overrides", mapping("package.json:overrides")],
+        ["pnpm", { overrides: mapping("package.json:pnpm.overrides") }],
+        ["aube", { overrides: mapping("package.json:aube.overrides") }],
+        ["resolutions", mapping("package.json:resolutions")],
+        ["dependencies", { foo: "^9.0.0", "@scope/pkg": "^9.0.0" }],
+        ["name", "demo"],
+      ] as const;
+      for (const ordered of [fields, [...fields].reverse()]) {
+        const content = JSON.stringify(Object.fromEntries(ordered));
+        expect(parsePackageJsonOverrides(content)).toEqual(expected);
+      }
+    }
   });
 
   it("returns empty array when pnpm field is absent", () => {
@@ -95,80 +110,8 @@ describe("parsePackageJsonOverrides", () => {
     );
   });
 
-  it("collects entries from top-level overrides (npm-style)", () => {
-    const content = JSON.stringify({
-      overrides: {
-        foo: ">=1.0.0",
-      },
-    });
-    expect(parsePackageJsonOverrides(content)).toEqual([
-      { key: "foo", spec: ">=1.0.0", source: "package.json:overrides" },
-    ]);
-  });
-
-  it("collects from both pnpm.overrides and top-level overrides", () => {
-    const content = JSON.stringify({
-      pnpm: {
-        overrides: {
-          a: ">=1.0.0",
-        },
-      },
-      overrides: {
-        b: ">=2.0.0",
-      },
-    });
-    expect(parsePackageJsonOverrides(content)).toEqual([
-      { key: "b", spec: ">=2.0.0", source: "package.json:overrides" },
-      { key: "a", spec: ">=1.0.0", source: "package.json:pnpm.overrides" },
-    ]);
-  });
-
-  it("reports the same key from both locations as separate entries", () => {
-    const content = JSON.stringify({
-      pnpm: { overrides: { foo: ">=2.0.0" } },
-      overrides: { foo: ">=1.0.0" },
-    });
-    expect(parsePackageJsonOverrides(content)).toEqual([
-      { key: "foo", spec: ">=1.0.0", source: "package.json:overrides" },
-      { key: "foo", spec: ">=2.0.0", source: "package.json:pnpm.overrides" },
-    ]);
-  });
-
   it("returns empty array when top-level overrides is not a mapping", () => {
     expect(parsePackageJsonOverrides('{"overrides":"oops"}')).toEqual([]);
-  });
-
-  it("collects entries from aube.overrides", () => {
-    const content = JSON.stringify({
-      aube: { overrides: { foo: ">=1.0.0" } },
-    });
-    expect(parsePackageJsonOverrides(content)).toEqual([
-      { key: "foo", spec: ">=1.0.0", source: "package.json:aube.overrides" },
-    ]);
-  });
-
-  it("collects entries from resolutions (Yarn-style)", () => {
-    const content = JSON.stringify({
-      resolutions: { foo: ">=1.0.0" },
-    });
-    expect(parsePackageJsonOverrides(content)).toEqual([
-      { key: "foo", spec: ">=1.0.0", source: "package.json:resolutions" },
-    ]);
-  });
-
-  it("collects from all four package.json containers in source order", () => {
-    const content = JSON.stringify({
-      resolutions: { d: ">=4.0.0" },
-      aube: { overrides: { c: ">=3.0.0" } },
-      pnpm: { overrides: { b: ">=2.0.0" } },
-      overrides: { a: ">=1.0.0" },
-    });
-    expect(parsePackageJsonOverrides(content)).toEqual([
-      { key: "a", spec: ">=1.0.0", source: "package.json:overrides" },
-      { key: "b", spec: ">=2.0.0", source: "package.json:pnpm.overrides" },
-      { key: "c", spec: ">=3.0.0", source: "package.json:aube.overrides" },
-      { key: "d", spec: ">=4.0.0", source: "package.json:resolutions" },
-    ]);
   });
 
   it("returns empty array when aube field or resolutions is not a mapping", () => {
