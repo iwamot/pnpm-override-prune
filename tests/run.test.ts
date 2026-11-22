@@ -2,36 +2,38 @@ import { describe, expect, it } from "bun:test";
 import { decideRun } from "../src/run.ts";
 
 describe("decideRun", () => {
-  it("returns sync version output for -v", () => {
-    const result = decideRun(["-v"], "1.2.3");
-    expect(result).toEqual({
-      kind: "sync",
-      exitCode: 0,
-      stdout: "pnpm-override-prune 1.2.3\n",
-      stderr: "",
-    });
-  });
-
-  it("returns sync version output for --version", () => {
-    const result = decideRun(["--version"], "1.2.3");
-    expect(result.kind).toBe("sync");
-    if (result.kind === "sync") {
-      expect(result.stdout).toBe("pnpm-override-prune 1.2.3\n");
+  it("renders the supplied version identically for both version options", () => {
+    for (const version of ["1.2.3", "9.0.0-rc.1", "0.0.0+build.7"]) {
+      for (const flag of ["-v", "--version"]) {
+        expect(decideRun([flag], version)).toEqual({
+          kind: "sync",
+          exitCode: 0,
+          stdout: `pnpm-override-prune ${version}\n`,
+          stderr: "",
+        });
+      }
     }
   });
 
-  it("returns sync help output for -h", () => {
-    const result = decideRun(["-h"], "1.2.3");
-    expect(result.kind).toBe("sync");
-    if (result.kind === "sync") {
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("Usage: pnpm-override-prune");
+  it("renders complete help identically for both help options independently of the version", () => {
+    const reference = decideRun(["-h"], "1.2.3");
+    for (const version of ["1.2.3", "9.0.0-rc.1"]) {
+      for (const flag of ["-h", "--help"]) {
+        const result = decideRun([flag], version);
+        expect(result).toEqual(reference);
+        expect(result).toEqual({
+          kind: "sync",
+          exitCode: 0,
+          stdout: expect.stringContaining("Usage: pnpm-override-prune"),
+          stderr: "",
+        });
+        if (result.kind === "sync") {
+          for (const option of ["--fix", "-v, --version", "-h, --help"]) {
+            expect(result.stdout).toContain(option);
+          }
+        }
+      }
     }
-  });
-
-  it("returns sync help output for --help", () => {
-    const result = decideRun(["--help"], "1.2.3");
-    expect(result.kind).toBe("sync");
   });
 
   it("returns sync error output with exit code 2 on bad args", () => {
