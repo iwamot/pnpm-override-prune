@@ -27,18 +27,24 @@ describe("computeNaturalResolution", () => {
       { spec: "~1.5.0", members: [1] },
       { spec: "2.0.0", members: [3] },
       { spec: ">=20.0.0", members: [] },
+      { spec: "not-a-spec", members: [] },
     ];
-    // Each published version is either absent, fallback-only, or admitted.
+    expect(computeNaturalResolution([">=1.0.0"], pool([]))).toBeNull();
+    // Neither malformed versions nor prereleases satisfy these stable ranges.
+    const irrelevant = ["not-a-version", "100.0.0-beta.1"];
+    // Each published stable version is absent, fallback-only, or admitted.
     for (let inventory = 0; inventory < 3 ** versions.length; inventory++) {
       const availability = versions.map(
         (_, index) => Math.floor(inventory / 3 ** index) % 3,
       );
-      const admitted = pool(
-        versions.filter((_, index) => availability[index] === 2),
-      );
-      const published = pool(
-        versions.filter((_, index) => availability[index] !== 0),
-      );
+      const admitted = pool([
+        ...versions.filter((_, index) => availability[index] === 2),
+        ...irrelevant,
+      ]);
+      const published = pool([
+        ...versions.filter((_, index) => availability[index] !== 0),
+        ...irrelevant,
+      ]);
       for (let mask = 0; mask < 2 ** requirements.length; mask++) {
         const parents = requirements.filter(
           (_, index) => (mask & (1 << index)) !== 0,
@@ -63,32 +69,6 @@ describe("computeNaturalResolution", () => {
         ).toBe(expected);
       }
     }
-  });
-
-  it("ignores pre-release versions when ranges are stable", () => {
-    expect(
-      computeNaturalResolution(
-        [">=1.0.0"],
-        pool(["1.0.0", "1.1.0-beta.1", "1.0.5"]),
-      ),
-    ).toBe("1.0.5");
-  });
-
-  it("handles invalid candidate versions by filtering them out", () => {
-    // satisfies() returns false on invalid versions instead of throwing.
-    expect(
-      computeNaturalResolution(
-        [">=1.0.0"],
-        pool(["not-a-version", "1.5.0", "2.0.0"]),
-      ),
-    ).toBe("2.0.0");
-  });
-
-  it("handles invalid parent specs by filtering all candidates out", () => {
-    // satisfies() returns false on invalid specs, so nothing matches.
-    expect(
-      computeNaturalResolution(["not-a-spec"], pool(["1.0.0", "2.0.0"])),
-    ).toBeNull();
   });
 });
 

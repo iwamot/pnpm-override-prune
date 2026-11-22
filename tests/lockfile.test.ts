@@ -34,20 +34,12 @@ describe("lockfile package identities", () => {
     }
   });
 
-  it("rejects keys without an @ separator", () => {
-    expect(parseSnapshotKey("foo")).toBeNull();
-  });
-
-  it("rejects keys whose only @ is a leading scope marker", () => {
-    expect(parseSnapshotKey("@scope")).toBeNull();
-  });
-
-  it("rejects empty string", () => {
-    expect(parseSnapshotKey("")).toBeNull();
-  });
-
-  it("rejects keys with empty version", () => {
-    expect(parseSnapshotKey("foo@")).toBeNull();
+  it("rejects incomplete package identities even when peer suffixes contain separators", () => {
+    for (const base of ["", "foo", "@scope", "foo@", "@scope/pkg@"]) {
+      for (const suffix of ["", "(peer@1.0.0)", "(@scope/peer@2.0.0)"]) {
+        expect(parseSnapshotKey(base + suffix)).toBeNull();
+      }
+    }
   });
 });
 
@@ -198,45 +190,33 @@ describe("parseLockfile", () => {
     }
   });
 
-  it("throws UnsupportedLockfileVersionError on missing version", () => {
-    const lockfile = "settings: {}\n";
-    let thrown: unknown;
-    try {
-      parseLockfile(lockfile);
-    } catch (e) {
-      thrown = e;
-    }
-    expect(thrown).toBeInstanceOf(UnsupportedLockfileVersionError);
-    if (thrown instanceof UnsupportedLockfileVersionError) {
-      expect(thrown.found).toBeNull();
-    }
-  });
-
-  it("throws UnsupportedLockfileVersionError on legacy version", () => {
-    const lockfile = "lockfileVersion: '6.0'\n";
-    let thrown: unknown;
-    try {
-      parseLockfile(lockfile);
-    } catch (e) {
-      thrown = e;
-    }
-    expect(thrown).toBeInstanceOf(UnsupportedLockfileVersionError);
-    if (thrown instanceof UnsupportedLockfileVersionError) {
-      expect(thrown.found).toBe("6.0");
-    }
-  });
-
-  it("throws UnsupportedLockfileVersionError when version is not a string", () => {
-    const lockfile = "lockfileVersion: 9.0\n";
-    let thrown: unknown;
-    try {
-      parseLockfile(lockfile);
-    } catch (e) {
-      thrown = e;
-    }
-    expect(thrown).toBeInstanceOf(UnsupportedLockfileVersionError);
-    if (thrown instanceof UnsupportedLockfileVersionError) {
-      expect(thrown.found).toBeNull();
+  it("rejects unsupported version values and reports the original string or a missing-version marker", () => {
+    const versions = [
+      [undefined, null],
+      [null, null],
+      [9, null],
+      [true, null],
+      [[], null],
+      [{}, null],
+      ["6.0", "6.0"],
+      ["8.0", "8.0"],
+      ["10.0", "10.0"],
+      ["9", "9"],
+    ] as const;
+    for (const [lockfileVersion, found] of versions) {
+      const document = { settings: {}, lockfileVersion };
+      for (const content of [stringify(document), JSON.stringify(document)]) {
+        let thrown: unknown;
+        try {
+          parseLockfile(content);
+        } catch (error) {
+          thrown = error;
+        }
+        expect(thrown).toBeInstanceOf(UnsupportedLockfileVersionError);
+        if (thrown instanceof UnsupportedLockfileVersionError) {
+          expect(thrown.found).toBe(found);
+        }
+      }
     }
   });
 
@@ -292,6 +272,11 @@ describe("extractMainDocument", () => {
         for (const prefix of prefixes) {
           const combined = prefix === "" ? main : `${prefix}---\n${main}`;
           for (const newline of ["\n", "\r\n"]) {
+            if (prefix !== "") {
+              expect(extractMainDocument(prefix.replace(/\n/g, newline))).toBe(
+                "",
+              );
+            }
             expect(extractMainDocument(combined.replace(/\n/g, newline))).toBe(
               main,
             );
@@ -299,10 +284,6 @@ describe("extractMainDocument", () => {
         }
       }
     }
-  });
-
-  it("returns an empty string for an env-only lockfile", () => {
-    expect(extractMainDocument(ENV_DOCUMENT)).toBe("");
   });
 });
 
