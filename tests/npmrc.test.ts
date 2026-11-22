@@ -50,27 +50,34 @@ describe("parseNpmrc", () => {
     }
   });
 
-  it("expands a variable reference from the environment", () => {
-    const entries = parseNpmrc(`//host/:_authToken=\${NPM_TOKEN}`, {
-      NPM_TOKEN: "secret",
-    });
-    expect(entries.get("//host/:_authToken")).toBe("secret");
-  });
-
-  it("expands several variables inside one value", () => {
-    const entries = parseNpmrc(`registry=\${SCHEME}://\${HOST}/`, {
-      SCHEME: "https",
-      HOST: "example.com",
-    });
-    expect(entries.get("registry")).toBe("https://example.com/");
-  });
-
-  it("treats a backslash-escaped expression as literal text", () => {
-    const entries = parseNpmrc(`a=\\\${NOT_A_VAR}\nb=\\\\\${VAR}`, {
-      VAR: "x",
-    });
-    expect(entries.get("a")).toBe(`\${NOT_A_VAR}`);
-    expect(entries.get("b")).toBe("\\\\x");
+  it("expands composed fragments once while preserving escaped references", () => {
+    for (const env of [
+      { LEFT: "https", RIGHT: "example.com" },
+      { LEFT: "", RIGHT: "${MISSING}" },
+      { LEFT: "$&=$1", RIGHT: "日本語\\value" },
+    ]) {
+      // Each fragment declares its meaning without reusing the expansion regex.
+      const fragments = [
+        { encoded: "literal", expanded: "literal" },
+        { encoded: "${LEFT}", expanded: env.LEFT },
+        { encoded: "${RIGHT}", expanded: env.RIGHT },
+        { encoded: "\\${MISSING}", expanded: "${MISSING}" },
+        { encoded: "\\\\${LEFT}", expanded: "\\\\" + env.LEFT },
+        { encoded: "\\\\\\${MISSING}", expanded: "\\\\${MISSING}" },
+        { encoded: "\\\\\\\\${RIGHT}", expanded: "\\\\\\\\" + env.RIGHT },
+      ];
+      for (const left of fragments) {
+        for (const right of fragments) {
+          for (const separator of ["", "://", "|"]) {
+            const encoded = left.encoded + separator + right.encoded;
+            const expected = left.expanded + separator + right.expanded;
+            expect(parseNpmrc(`token=${encoded}`, env)).toEqual(
+              new Map([["token", expected]]),
+            );
+          }
+        }
+      }
+    }
   });
 
   it("fails when a referenced variable is not set", () => {
