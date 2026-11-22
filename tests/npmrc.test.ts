@@ -244,72 +244,66 @@ describe("registryFor", () => {
     );
   });
 
-  it("sends a bearer token configured for the registry host", () => {
-    const config = configFrom(
-      [
-        "registry=https://npm.example.com/",
-        "//npm.example.com/:_authToken=tok",
-      ].join("\n"),
-    );
-    expect(registryFor("lodash", config).authorization).toBe("Bearer tok");
-  });
-
-  it("sends basic credentials configured with _auth", () => {
-    const config = configFrom(
-      [
-        "registry=https://npm.example.com/",
-        "//npm.example.com/:_auth=dXM6cHc=",
-      ].join("\n"),
-    );
-    expect(registryFor("lodash", config).authorization).toBe("Basic dXM6cHc=");
-  });
-
-  it("picks the most specific path prefix that has credentials", () => {
-    const config = configFrom(
-      [
-        "registry=https://host.example.com/artifactory/api/npm/npm-virtual/",
-        "//host.example.com/:_authToken=host-wide",
-        "//host.example.com/artifactory/api/npm/:_authToken=all-repos",
-        "//host.example.com/artifactory/api/npm/npm-virtual/:_authToken=this-repo",
-      ].join("\n"),
-    );
-    expect(registryFor("lodash", config).authorization).toBe(
-      "Bearer this-repo",
-    );
-  });
-
-  it("walks up to a shorter path prefix when the full one has none", () => {
-    const config = configFrom(
-      [
-        "registry=https://host.example.com/artifactory/api/npm/npm-virtual",
-        "//host.example.com/artifactory/:_authToken=under-artifactory",
-      ].join("\n"),
-    );
-    expect(registryFor("lodash", config).authorization).toBe(
-      "Bearer under-artifactory",
-    );
-  });
-
-  it("does not send credentials configured for another host", () => {
-    const config = configFrom(
-      [
-        "registry=https://npm.example.com/",
-        "//other.example.com/:_authToken=tok",
-      ].join("\n"),
-    );
-    expect(registryFor("lodash", config).authorization).toBeNull();
-  });
-
-  it("keeps a port as part of the host", () => {
-    const config = configFrom(
-      [
-        "registry=http://localhost:4873/",
-        "//localhost:4873/:_authToken=tok",
-      ].join("\n"),
-    );
-    expect(registryFor("lodash", config)).toEqual({
-      baseUrl: "http://localhost:4873",
-      authorization: "Bearer tok",
-    });
+  it("selects credentials by path specificity, then bearer preference, independent of entry order", () => {
+    const prefixes = ["/", "/team/", "/team/api/npm/repo/"];
+    // Eligible ancestor ranks are explicit, independent of URL prefix parsing.
+    const targets = [
+      { path: "", ancestors: [0] },
+      { path: "/team", ancestors: [1, 0] },
+      { path: "/team/api/npm/repo", ancestors: [2, 1, 0] },
+      { path: "/team/api/npm/repository", ancestors: [1, 0] },
+      { path: "/other", ancestors: [0] },
+    ];
+    for (const [protocol, host] of [
+      ["https", "host.example.com"],
+      ["http", "host.example.com:4873"],
+    ]) {
+      for (let mask = 0; mask < 2 ** (prefixes.length * 2); mask++) {
+        const credentials = prefixes.flatMap((prefix, rank) =>
+          [
+            { field: "_authToken", value: `token-${rank}`, scheme: "Bearer" },
+            {
+              field: "_auth",
+              value: btoa(`user-${rank}:password`),
+              scheme: "Basic",
+            },
+          ].flatMap(({ field, value, scheme }, index) =>
+            (mask & (1 << (rank * 2 + index))) === 0
+              ? []
+              : [
+                  {
+                    rank,
+                    line: `//${host}${prefix}:${field}=${value}`,
+                    authorization: `${scheme} ${value}`,
+                  },
+                ],
+          ),
+        );
+        for (const { path, ancestors } of targets) {
+          const baseUrl = `${protocol}://${host}${path}`;
+          const preferred = ancestors.flatMap((rank) =>
+            credentials.filter((entry) => entry.rank === rank),
+          );
+          const expected = {
+            baseUrl,
+            authorization: preferred[0]?.authorization ?? null,
+          };
+          for (const trailingSlash of ["", "/"]) {
+            const lines = [
+              `registry=${baseUrl}${trailingSlash}`,
+              "//other.example.com/:_authToken=foreign-host",
+              "//host.example.com:9999/:_authToken=foreign-port",
+              `//${host}/unrelated/:_authToken=unrelated-path`,
+              ...credentials.map(({ line }) => line),
+            ];
+            for (const ordered of [lines, lines.toReversed()]) {
+              expect(
+                registryFor("lodash", configFrom(ordered.join("\n"))),
+              ).toEqual(expected);
+            }
+          }
+        }
+      }
+    }
   });
 });
