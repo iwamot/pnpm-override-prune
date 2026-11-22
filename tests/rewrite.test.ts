@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { parse } from "yaml";
 import type { PackageJsonContainer } from "../src/manifest.ts";
 import {
   type PackageJsonRemoval,
@@ -199,42 +200,65 @@ describe("removeFromPackageJson", () => {
 });
 
 describe("removeFromWorkspaceYaml", () => {
-  it("removes the given keys from overrides field", () => {
-    const before = `overrides:
-  '@xmldom/xmldom': '>=0.9.10'
-  postcss: '>=8.5.10'
-  keep-me: '1.0.0'
-`;
-    const after = removeFromWorkspaceYaml(before, [
-      "@xmldom/xmldom",
-      "postcss",
-    ]);
-    expect(after).toContain("keep-me");
-    expect(after).not.toContain("@xmldom/xmldom");
-    expect(after).not.toContain("postcss");
-  });
-
-  it("preserves comments and surrounding fields", () => {
-    const before = `# top comment
-minimumReleaseAge: 1440
-
-overrides:
-  foo: '>=1.0.0'
-  bar: '>=2.0.0'
-
-# trailing comment
-`;
-    const after = removeFromWorkspaceYaml(before, ["foo"]);
-    expect(after).toContain("# top comment");
-    expect(after).toContain("minimumReleaseAge: 1440");
-    expect(after).toContain("# trailing comment");
-    expect(after).toContain("bar:");
-    expect(after).not.toMatch(/^\s+foo:/m);
-  });
-
-  it("returns content unchanged when keys is empty", () => {
-    const before = `overrides:\n  foo: '>=1.0.0'\n`;
-    expect(removeFromWorkspaceYaml(before, [])).toBe(before);
+  it("removes every selected subset while preserving other settings and comments", () => {
+    const entries = [
+      ["foo", ">=1.0.0"],
+      ["@scope/pkg", ">=2.0.0"],
+      ["parent@^1>child", "npm:aliased@^3.0.0"],
+      ["日本語", "4.0.0"],
+    ] as const;
+    for (let mask = 0; mask < 2 ** entries.length; mask++) {
+      const selected = entries.filter(
+        (_, index) => (mask & (1 << index)) !== 0,
+      );
+      const retained = entries.filter(
+        (_, index) => (mask & (1 << index)) === 0,
+      );
+      const expected = {
+        minimumReleaseAge: 1440,
+        packages: ["apps/*"],
+        custom: { overrides: Object.fromEntries(entries) },
+        overrides: Object.fromEntries(retained),
+      };
+      const pairs = entries.map(
+        ([key, value]) => `${JSON.stringify(key)}: ${JSON.stringify(value)}`,
+      );
+      for (const mapping of [
+        `overrides:\n${pairs.map((pair) => `  ${pair}`).join("\n")}`,
+        `overrides: { ${pairs.join(", ")} }`,
+      ]) {
+        for (const newline of ["", "\n"]) {
+          const before =
+            [
+              "# workspace settings",
+              "minimumReleaseAge: 1440",
+              "packages: [apps/*]",
+              `custom: ${JSON.stringify({ overrides: Object.fromEntries(entries) })}`,
+              mapping,
+              "# end of workspace",
+            ].join("\n") + newline;
+          const keys = selected.map(([key]) => key);
+          const after = removeFromWorkspaceYaml(before, keys);
+          const actual: unknown = parse(after);
+          expect(actual).toEqual(expected);
+          expect(after).toContain("# workspace settings");
+          expect(after).toContain("# end of workspace");
+          expect(removeFromWorkspaceYaml(after, keys)).toBe(after);
+          if (keys.length === 0) {
+            expect(after).toBe(before);
+          }
+          // Removal order, repeated keys, and missing keys have no semantic effect.
+          const reordered: unknown = parse(
+            removeFromWorkspaceYaml(before, [
+              ...keys.toReversed(),
+              ...keys,
+              "not-present",
+            ]),
+          );
+          expect(reordered).toEqual(expected);
+        }
+      }
+    }
   });
 
   it("returns content (re-emitted) when overrides field is absent", () => {
