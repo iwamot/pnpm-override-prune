@@ -44,19 +44,28 @@ describe("decideRun", () => {
     }
   });
 
-  it("returns audit request with default path when given no args", () => {
-    expect(decideRun([], "1.2.3")).toEqual({
-      kind: "audit",
-      path: "./package.json",
-      fix: false,
-    });
-  });
-
-  it("returns audit request with path and fix when both are given", () => {
-    expect(decideRun(["custom/package.json", "--fix"], "1.2.3")).toEqual({
-      kind: "audit",
-      path: "custom/package.json",
-      fix: true,
-    });
+  it("preserves audit options independently of argument order and display version", () => {
+    for (const path of [
+      null,
+      "custom/package.json",
+      "プロジェクト/package.json",
+      "",
+    ]) {
+      for (const fix of [false, true]) {
+        const args = [
+          ...(path === null ? [] : [path]),
+          ...(fix ? ["--fix"] : []),
+        ];
+        for (const ordered of [args, args.toReversed()]) {
+          for (const version of ["1.2.3", "9.0.0-rc.1"]) {
+            expect(decideRun(ordered, version)).toEqual({
+              kind: "audit",
+              path: path ?? "./package.json",
+              fix,
+            });
+          }
+        }
+      }
+    }
   });
 });
