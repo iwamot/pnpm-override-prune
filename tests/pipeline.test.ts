@@ -834,32 +834,60 @@ describe("evaluateOverride with a release-age policy", () => {
     ],
   ]);
 
-  it("keeps an override whose floor is a version too young to resolve", () => {
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=1.1.0"),
-      makeLockfile({}),
-      makeWorkspaceDirectDeps({ foo: "^1.0.0" }),
-      registry,
-      createReleasePolicy(
-        { minimumReleaseAge: 1440, minimumReleaseAgeExclude: [] },
-        now,
-      ),
+  it("applies release policy to both direct and transitive verdicts across override floors", () => {
+    const policies = [
+      [1440, [], "1.0.0", "keep"],
+      [0, [], "1.1.0", "prune"],
+      [60, [], "1.1.0", "prune"],
+      [61, [], "1.0.0", "keep"],
+      [1440, ["foo"], "1.1.0", "prune"],
+      [1440, ["foo@1.1.0"], "1.1.0", "prune"],
+      [1440, ["f*"], "1.1.0", "prune"],
+      [1440, ["bar"], "1.0.0", "keep"],
+    ] as const;
+    const contexts = [
+      [makeLockfile({}), makeWorkspaceDirectDeps({ foo: "^1.0.0" })],
+      [
+        makeLockfile({
+          transitive: {
+            foo: [{ parent: "parent@1.0.0", resolved: "1.0.0" }],
+          },
+        }),
+        NO_DIRECT,
+      ],
+    ] as const;
+    const metadata = new Map(registry);
+    metadata.set(
+      "parent",
+      makeMetadata("parent", { "1.0.0": { foo: "^1.0.0" } }),
     );
-    expect(result).toEqual({ status: "keep", value: "1.0.0" });
-  });
-
-  it("prunes the same override once the check is off", () => {
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=1.1.0"),
-      makeLockfile({}),
-      makeWorkspaceDirectDeps({ foo: "^1.0.0" }),
-      registry,
-      createReleasePolicy(
-        { minimumReleaseAge: 0, minimumReleaseAgeExclude: [] },
+    for (const [
+      minimumReleaseAge,
+      minimumReleaseAgeExclude,
+      value,
+      upperStatus,
+    ] of policies) {
+      const policy = createReleasePolicy(
+        { minimumReleaseAge, minimumReleaseAgeExclude },
         now,
-      ),
-    );
-    expect(result).toEqual({ status: "prune", value: "1.1.0" });
+      );
+      for (const [lockfile, direct] of contexts) {
+        for (const [spec, status] of [
+          [">=1.0.0", "prune"],
+          [">=1.1.0", upperStatus],
+        ] as const) {
+          expect(
+            evaluateOverride(
+              PKG_OVERRIDE("foo", spec),
+              lockfile,
+              direct,
+              metadata,
+              policy,
+            ),
+          ).toEqual({ status, value });
+        }
+      }
+    }
   });
 });
 
