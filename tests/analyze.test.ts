@@ -10,32 +10,33 @@ import {
 } from "../src/analyze.ts";
 
 describe("isPureLowerBound", () => {
-  it("accepts >=", () => {
-    expect(isPureLowerBound(">=1.0.0")).toBe(true);
+  it("accepts conjunctions and alternatives made entirely from lower bounds", () => {
+    const bounds = ["1.2.3", "2.0.0-rc.1", "10.0.0"].flatMap((version) =>
+      [">", ">="].map((operator) => operator + version),
+    );
+    for (const first of bounds) {
+      expect(isPureLowerBound(first)).toBe(true);
+      for (const second of bounds) {
+        for (const join of [" ", " || "]) {
+          expect(isPureLowerBound(first + join + second)).toBe(true);
+        }
+      }
+    }
   });
 
-  it("accepts >", () => {
-    expect(isPureLowerBound(">1.0.0")).toBe(true);
-  });
-
-  it("accepts OR of pure lower bounds", () => {
-    expect(isPureLowerBound(">=1.0.0 || >=2.0.0")).toBe(true);
-  });
-
-  it("rejects exact version", () => {
-    expect(isPureLowerBound("1.0.0")).toBe(false);
-  });
-
-  it("rejects caret range", () => {
-    expect(isPureLowerBound("^1.0.0")).toBe(false);
-  });
-
-  it("rejects tilde range", () => {
-    expect(isPureLowerBound("~1.0.0")).toBe(false);
-  });
-
-  it("rejects bounded range", () => {
-    expect(isPureLowerBound(">=1.0.0 <2.0.0")).toBe(false);
+  it("rejects restrictions other than lower bounds anywhere in a compound range", () => {
+    for (const version of ["1.2.3", "2.0.0-rc.1", "10.0.0"]) {
+      for (const operator of ["", "^", "~", "<", "<="]) {
+        const restriction = operator + version;
+        expect(isPureLowerBound(restriction)).toBe(false);
+        for (const lower of [">=1.2.3", ">2.0.0-rc.1"]) {
+          for (const join of [" ", " || "]) {
+            expect(isPureLowerBound(lower + join + restriction)).toBe(false);
+            expect(isPureLowerBound(restriction + join + lower)).toBe(false);
+          }
+        }
+      }
+    }
   });
 
   it("rejects empty string", () => {
