@@ -299,21 +299,25 @@ snapshots:
 `;
 
 describe("extractMainDocument", () => {
-  it("returns a single-document lockfile unchanged", () => {
-    expect(extractMainDocument(VALID_LOCKFILE)).toBe(VALID_LOCKFILE);
-  });
-
-  it("returns the document after the env lockfile", () => {
-    const combined = `${ENV_DOCUMENT}---\n${VALID_LOCKFILE}`;
-    expect(extractMainDocument(combined)).toBe(VALID_LOCKFILE);
-  });
-
-  it("handles CRLF line endings", () => {
-    const combined = `${ENV_DOCUMENT}---\n${VALID_LOCKFILE}`.replace(
-      /\n/g,
-      "\r\n",
-    );
-    expect(extractMainDocument(combined)).toBe(VALID_LOCKFILE);
+  it("recovers the dependency document across env prefixes and line endings", () => {
+    const prefixes = [
+      "",
+      ENV_DOCUMENT,
+      `${ENV_DOCUMENT}note: |\n  ---\n  literal marker\n`,
+    ];
+    for (const comment of ["", "# dependency lockfile\n"]) {
+      for (const trailingNewline of ["", "\n"]) {
+        const main = comment + VALID_LOCKFILE.trimEnd() + trailingNewline;
+        for (const prefix of prefixes) {
+          const combined = prefix === "" ? main : `${prefix}---\n${main}`;
+          for (const newline of ["\n", "\r\n"]) {
+            expect(extractMainDocument(combined.replace(/\n/g, newline))).toBe(
+              main,
+            );
+          }
+        }
+      }
+    }
   });
 
   it("returns an empty string for an env-only lockfile", () => {
