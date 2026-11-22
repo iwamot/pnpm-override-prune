@@ -171,68 +171,69 @@ describe("gatherSpecsForTarget", () => {
     }
   });
 
-  it("skips parents whose snapshot key cannot be parsed", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        target: [{ parent: "no-at-sign", resolved: "1.0.0" }],
-      },
-    });
-    expect(
-      gatherSpecsForTarget("target", lockfile, NO_DIRECT, new Map()),
-    ).toEqual({ specs: [], protocolSpecs: [] });
-  });
-
-  it("skips parents whose registry metadata is missing", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        target: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
-      },
-    });
-    expect(
-      gatherSpecsForTarget("target", lockfile, NO_DIRECT, new Map()),
-    ).toEqual({ specs: [], protocolSpecs: [] });
-  });
-
-  it("skips parents whose version meta is missing", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        target: [{ parent: "parentA@9.9.9", resolved: "1.0.0" }],
-      },
-    });
-    const registry = new Map<string, PackageMetadata>([
-      ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.0.0" } })],
-    ]);
-    expect(
-      gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
-    ).toEqual({ specs: [], protocolSpecs: [] });
-  });
-
-  it("skips parents that don't list the target in their dependencies", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        target: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
-      },
-    });
-    const registry = new Map<string, PackageMetadata>([
-      ["parentA", makeMetadata("parentA", { "1.0.0": { other: ">=1.0.0" } })],
-    ]);
-    expect(
-      gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
-    ).toEqual({ specs: [], protocolSpecs: [] });
-  });
-
-  it("drops parents whose fetch failed", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        target: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
-      },
-    });
+  it("ignores unavailable parent constraints without losing usable direct or parent constraints", () => {
+    const unusable = [
+      "broken",
+      "missing@1.0.0",
+      "failed@1.0.0",
+      "wrong-version@9.9.9",
+      "not-depending@1.0.0",
+    ];
     const registry = new Map<string, PackageMetadata | null>([
-      ["parentA", null],
+      ["valid", makeMetadata("valid", { "1.0.0": { target: "^2.0.0" } })],
+      ["broken", makeMetadata("broken", { "1.0.0": { target: ">=99.0.0" } })],
+      ["failed", null],
+      [
+        "wrong-version",
+        makeMetadata("wrong-version", { "1.0.0": { target: ">=99.0.0" } }),
+      ],
+      [
+        "not-depending",
+        makeMetadata("not-depending", { "1.0.0": { other: ">=99.0.0" } }),
+      ],
     ]);
-    expect(
-      gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
-    ).toEqual({ specs: [], protocolSpecs: [] });
+    for (let mask = 0; mask < 2 ** unusable.length; mask++) {
+      const selected = unusable.filter(
+        (_, index) => (mask & (1 << index)) !== 0,
+      );
+      for (const withUsable of [false, true]) {
+        const parents = withUsable ? [...selected, "valid@1.0.0"] : selected;
+        const direct: WorkspaceDirectDeps = withUsable
+          ? new Map([
+              [
+                "target",
+                [
+                  { importerKey: ".", depType: "dependencies", spec: "^3.0.0" },
+                  {
+                    importerKey: "packages/a",
+                    depType: "dependencies",
+                    spec: "workspace:*",
+                  },
+                ],
+              ],
+            ])
+          : NO_DIRECT;
+        for (const ordered of [parents, parents.toReversed()]) {
+          const lockfile = makeLockfile({
+            transitive: {
+              target: ordered.map((parent) => ({ parent, resolved: "1.0.0" })),
+            },
+          });
+          const actual = gatherSpecsForTarget(
+            "target",
+            lockfile,
+            direct,
+            registry,
+          );
+          expect(new Set(actual.specs)).toEqual(
+            new Set(withUsable ? ["^3.0.0", "^2.0.0"] : []),
+          );
+          expect(new Set(actual.protocolSpecs)).toEqual(
+            new Set(withUsable ? ["workspace:*"] : []),
+          );
+        }
+      }
+    }
   });
 });
 
