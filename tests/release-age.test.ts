@@ -220,87 +220,79 @@ describe("publishedPool", () => {
 });
 
 describe("admittedPool", () => {
-  const times = {
-    "1.0.0": "2026-09-01T00:00:00Z",
-    "1.1.0": "2026-09-10T00:00:00Z",
-    "1.2.0": "2026-09-22T11:00:00Z",
-    "2.0.0-beta.1": "2026-09-22T11:30:00Z",
-  };
-
   it("is the published pool when nothing is filtered", () => {
     const m = meta({ versions: ["1.0.0"], latest: "1.0.0" });
     expect(admittedPool(m, policy(1440), "pkg")).toEqual(publishedPool(m));
   });
 
-  it("keeps the latest tag when its version is mature", () => {
-    const m = meta({
-      versions: Object.keys(times),
-      latest: "1.1.0",
-      publishedAt: times,
-    });
-    expect(admittedPool(m, policy(1440), "pkg")).toEqual({
-      versions: ["1.0.0", "1.1.0"],
-      latest: "1.1.0",
-      deprecated: new Set(),
-    });
-  });
-
-  it("moves latest back to the highest mature version below it", () => {
-    const m = meta({
-      versions: Object.keys(times),
-      latest: "1.2.0",
-      publishedAt: times,
-    });
-    expect(admittedPool(m, policy(1440), "pkg").latest).toBe("1.1.0");
-  });
-
-  it("prefers a non-deprecated version when moving latest", () => {
-    const m = meta({
-      versions: Object.keys(times),
-      latest: "1.2.0",
-      deprecated: ["1.1.0"],
-      publishedAt: times,
-    });
-    expect(admittedPool(m, policy(1440), "pkg").latest).toBe("1.0.0");
-  });
-
-  it("falls back to a deprecated version when only those remain", () => {
-    const m = meta({
-      versions: Object.keys(times),
-      latest: "1.2.0",
-      deprecated: ["1.0.0", "1.1.0"],
-      publishedAt: times,
-    });
-    expect(admittedPool(m, policy(1440), "pkg").latest).toBe("1.1.0");
-  });
-
-  it("keeps a prerelease latest on prereleases only", () => {
-    const m = meta({
-      versions: Object.keys(times),
-      latest: "2.0.0-beta.1",
-      publishedAt: times,
-    });
-    expect(admittedPool(m, policy(1440), "pkg").latest).toBeNull();
-  });
-
-  it("drops latest when no mature version is at or below it", () => {
-    const m = meta({
-      versions: ["1.2.0", "1.3.0"],
-      latest: "1.2.0",
-      publishedAt: {
-        "1.2.0": "2026-09-22T11:00:00Z",
-        "1.3.0": "2026-09-01T00:00:00Z",
-      },
-    });
-    expect(admittedPool(m, policy(1440), "pkg")).toEqual({
-      versions: ["1.3.0"],
-      latest: null,
-      deprecated: new Set(),
-    });
-  });
-
-  it("has no latest when the registry reports none", () => {
-    const m = meta({ versions: Object.keys(times), publishedAt: times });
-    expect(admittedPool(m, policy(1440), "pkg").latest).toBeNull();
+  it("preserves pool metadata and repoints latest within its release stage and version ceiling", () => {
+    // This order and release-stage membership define the model without semver calls.
+    const versions = [
+      "1.0.0",
+      "1.1.0-beta.1",
+      "1.1.0-beta.2",
+      "2.0.0",
+      "10.0.0",
+      "20.0.0",
+    ];
+    const prereleases = new Set(["1.1.0-beta.1", "1.1.0-beta.2"]);
+    const active = policy(1440);
+    for (let matureMask = 0; matureMask < 2 ** versions.length; matureMask++) {
+      const mature = versions.filter(
+        (_, index) => (matureMask & (1 << index)) !== 0,
+      );
+      const publishedAt = Object.fromEntries(
+        versions.map(
+          (version) =>
+            [
+              version,
+              mature.includes(version)
+                ? "2026-09-21T12:00:00Z"
+                : "2026-09-22T11:00:00Z",
+            ] as const,
+        ),
+      );
+      for (
+        let deprecatedMask = 0;
+        deprecatedMask < 2 ** versions.length;
+        deprecatedMask++
+      ) {
+        const deprecated = versions.filter(
+          (_, index) => (deprecatedMask & (1 << index)) !== 0,
+        );
+        for (const latest of [null, ...versions]) {
+          const predecessors =
+            latest === null
+              ? []
+              : versions
+                  .slice(0, versions.indexOf(latest) + 1)
+                  .filter(
+                    (version) =>
+                      mature.includes(version) &&
+                      prereleases.has(version) === prereleases.has(latest),
+                  );
+          const preferred = predecessors.filter(
+            (version) => !deprecated.includes(version),
+          );
+          const expectedLatest =
+            latest !== null && mature.includes(latest)
+              ? latest
+              : (preferred.at(-1) ?? predecessors.at(-1) ?? null);
+          for (const ordered of [versions, [...versions].reverse()]) {
+            const metadata = meta({
+              versions: ordered,
+              ...(latest === null ? {} : { latest }),
+              deprecated,
+              publishedAt,
+            });
+            expect(admittedPool(metadata, active, "pkg")).toEqual({
+              versions: ordered.filter((version) => mature.includes(version)),
+              latest: expectedLatest,
+              deprecated: new Set(deprecated),
+            });
+          }
+        }
+      }
+    }
   });
 });
