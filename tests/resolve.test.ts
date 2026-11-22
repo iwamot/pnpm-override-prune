@@ -93,47 +93,60 @@ describe("computeNaturalResolution", () => {
 });
 
 describe("pickVersion", () => {
-  it("prefers the latest tag when it satisfies the range", () => {
-    const p = pool(["1.0.0", "1.1.0", "1.2.0"], { latest: "1.1.0" });
-    expect(pickVersion("^1.0.0", p)).toBe("1.1.0");
-    expect(pickVersion("*", p)).toBe("1.1.0");
-  });
-
-  it("takes the highest satisfying version when latest is outside the range", () => {
-    const p = pool(["1.0.0", "1.1.0", "2.0.0"], { latest: "2.0.0" });
-    expect(pickVersion("^1.0.0", p)).toBe("1.1.0");
-  });
-
-  it("picks a prerelease latest for a bare star, as pnpm does", () => {
-    const p = pool(["1.0.0", "2.0.0-beta.1"], { latest: "2.0.0-beta.1" });
-    expect(pickVersion("*", p)).toBe("2.0.0-beta.1");
-    expect(pickVersion("^1.0.0", p)).toBe("1.0.0");
-  });
-
-  it("avoids a deprecated highest version when another satisfies", () => {
-    const p = pool(["1.0.0", "1.1.0", "1.2.0"], { deprecated: ["1.2.0"] });
-    expect(pickVersion("^1.0.0", p)).toBe("1.1.0");
-  });
-
-  it("takes the deprecated version when nothing else satisfies", () => {
-    const p = pool(["1.0.0", "1.2.0"], { deprecated: ["1.2.0"] });
-    expect(pickVersion("~1.2.0", p)).toBe("1.2.0");
-    expect(
-      pickVersion("^1.0.0", pool(["1.2.0"], { deprecated: ["1.2.0"] })),
-    ).toBe("1.2.0");
-  });
-
-  it("still returns a deprecated latest, as pnpm does", () => {
-    const p = pool(["1.0.0", "1.1.0"], {
-      latest: "1.1.0",
-      deprecated: ["1.1.0"],
-    });
-    expect(pickVersion("^1.0.0", p)).toBe("1.1.0");
-  });
-
-  it("returns null when nothing satisfies", () => {
-    expect(
-      pickVersion("^3.0.0", pool(["1.0.0"], { latest: "1.0.0" })),
-    ).toBeNull();
+  it("selects by latest tag, deprecation preference, and semantic version rank", () => {
+    const versions = ["1.0.0", "1.1.0", "2.0.0-beta.1", "2.0.0", "10.0.0"];
+    // Explicit membership keeps the oracle independent of semver parsing.
+    const requirements = [
+      { spec: "*", members: [0, 1, 3, 4], tagged: [0, 1, 2, 3, 4] },
+      { spec: "^1.0.0", members: [0, 1], tagged: [0, 1] },
+      { spec: ">=2.0.0", members: [3, 4], tagged: [3, 4] },
+      { spec: "~1.1.0", members: [1], tagged: [1] },
+      { spec: ">=2.0.0-beta.1 <2.0.0", members: [2], tagged: [2] },
+      { spec: "^20.0.0", members: [], tagged: [] },
+    ];
+    for (let inventory = 0; inventory < 2 ** versions.length; inventory++) {
+      const present = versions.map(
+        (_, rank) => (inventory & (1 << rank)) !== 0,
+      );
+      const offered = versions.filter((_, rank) => present[rank]);
+      for (
+        let deprecatedMask = 0;
+        deprecatedMask < 2 ** versions.length;
+        deprecatedMask++
+      ) {
+        const deprecated = versions.filter(
+          (_, rank) => (deprecatedMask & (1 << rank)) !== 0,
+        );
+        for (let latestRank = -1; latestRank < versions.length; latestRank++) {
+          if (latestRank !== -1 && !present[latestRank]) {
+            continue;
+          }
+          for (const { spec, members, tagged } of requirements) {
+            // A tagged match outranks all alternatives; otherwise prefer fresh
+            // matches, with descending semantic rank as the tie-breaker.
+            const descending = members.toReversed();
+            const preference = [
+              ...(tagged.includes(latestRank) ? [latestRank] : []),
+              ...descending.filter(
+                (rank) => (deprecatedMask & (1 << rank)) === 0,
+              ),
+              ...descending,
+            ];
+            const winner = preference.find((rank) => present[rank]);
+            const expected =
+              winner === undefined ? null : (versions[winner] ?? null);
+            for (const order of [offered, offered.toReversed()]) {
+              expect(
+                pickVersion(spec, {
+                  versions: order,
+                  latest: versions[latestRank] ?? null,
+                  deprecated: new Set(deprecated),
+                }),
+              ).toBe(expected);
+            }
+          }
+        }
+      }
+    }
   });
 });
