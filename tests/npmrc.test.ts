@@ -208,6 +208,17 @@ describe("buildRegistryConfig", () => {
     ).toThrow(new NpmrcConfigError("invalid registry url: npm.example.com/"));
   });
 
+  it("leaves other settings of a scope alone", () => {
+    expect(() =>
+      buildRegistryConfig({
+        env: {},
+        projectNpmrc:
+          "@myorg:always-auth=true\n@myorg:registry=https://npm.example.com/",
+        userNpmrc: null,
+      }),
+    ).not.toThrow();
+  });
+
   it("propagates an unset variable as a configuration error", () => {
     expect(() =>
       buildRegistryConfig({
