@@ -1,71 +1,64 @@
 import { describe, expect, it } from "bun:test";
 import { DEFAULT_PACKAGE_JSON_PATH, parseArgs } from "../src/args.ts";
 
+function* permutations(args: readonly string[]): Generator<string[]> {
+  if (args.length === 0) {
+    yield [];
+    return;
+  }
+  for (const [index, arg] of args.entries()) {
+    const others = args.filter((_, other) => other !== index);
+    for (const rest of permutations(others)) {
+      yield [arg, ...rest];
+    }
+  }
+}
+
 describe("parseArgs", () => {
-  it("returns audit with default path when given no args", () => {
-    expect(parseArgs([])).toEqual({
-      kind: "audit",
-      path: DEFAULT_PACKAGE_JSON_PATH,
-      fix: false,
-    });
-  });
-
-  it("recognizes -v as a version request", () => {
-    expect(parseArgs(["-v"])).toEqual({ kind: "version" });
-  });
-
-  it("recognizes --version as a version request", () => {
-    expect(parseArgs(["--version"])).toEqual({ kind: "version" });
-  });
-
-  it("recognizes -h as a help request", () => {
-    expect(parseArgs(["-h"])).toEqual({ kind: "help" });
-  });
-
-  it("recognizes --help as a help request", () => {
-    expect(parseArgs(["--help"])).toEqual({ kind: "help" });
-  });
-
-  it("treats version flag as taking precedence over fix and positional", () => {
-    expect(parseArgs(["--version", "--fix", "foo"])).toEqual({
-      kind: "version",
-    });
-  });
-
-  it("treats help flag as taking precedence over fix and positional", () => {
-    expect(parseArgs(["--help", "foo"])).toEqual({ kind: "help" });
-  });
-
-  it("captures --fix as audit with fix=true and default path", () => {
-    expect(parseArgs(["--fix"])).toEqual({
-      kind: "audit",
-      path: DEFAULT_PACKAGE_JSON_PATH,
-      fix: true,
-    });
-  });
-
-  it("captures positional path", () => {
-    expect(parseArgs(["path/to/package.json"])).toEqual({
-      kind: "audit",
-      path: "path/to/package.json",
-      fix: false,
-    });
-  });
-
-  it("captures positional path together with --fix", () => {
-    expect(parseArgs(["path/to/package.json", "--fix"])).toEqual({
-      kind: "audit",
-      path: "path/to/package.json",
-      fix: true,
-    });
-  });
-
-  it("captures --fix before the positional path", () => {
-    expect(parseArgs(["--fix", "path/to/package.json"])).toEqual({
-      kind: "audit",
-      path: "path/to/package.json",
-      fix: true,
-    });
+  it("preserves command intent across flag aliases, order, and repetition", () => {
+    const versions = [
+      { flag: null, request: null },
+      { flag: "-v", request: { kind: "version" } },
+      { flag: "--version", request: { kind: "version" } },
+    ] as const;
+    const helpRequests = [
+      { flag: null, request: null },
+      { flag: "-h", request: { kind: "help" } },
+      { flag: "--help", request: { kind: "help" } },
+    ] as const;
+    for (const version of versions) {
+      for (const help of helpRequests) {
+        for (const fix of [false, true]) {
+          for (const path of [
+            null,
+            "path/to/package.json",
+            "日本語 workspace/package.json",
+            "",
+          ]) {
+            // Command priority is version, help, then audit; audit preserves the path verbatim.
+            const expected = version.request ??
+              help.request ?? {
+                kind: "audit" as const,
+                path: path ?? DEFAULT_PACKAGE_JSON_PATH,
+                fix,
+              };
+            const flags = [
+              version.flag,
+              help.flag,
+              fix ? "--fix" : null,
+            ].filter((flag) => flag !== null);
+            const args = path === null ? flags : [...flags, path];
+            for (const ordered of permutations(args)) {
+              expect(parseArgs(ordered)).toEqual(expected);
+              const repeated = ordered.flatMap((arg) =>
+                flags.includes(arg) ? [arg, arg] : [arg],
+              );
+              expect(parseArgs(repeated)).toEqual(expected);
+            }
+          }
+        }
+      }
+    }
   });
 
   it("returns error when given multiple positional arguments", () => {
