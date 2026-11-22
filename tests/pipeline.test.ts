@@ -455,66 +455,81 @@ describe("evaluateOverride", () => {
     expect(result).toEqual({ status: "keep", value: "1.0.0" });
   });
 
-  it("skips when the only direct dep spec is protocol-prefixed instead of calling it unused", () => {
-    // pnpm.overrides: { lodash: ">=4.17.21" } with "lodash": "catalog:" in the
-    // importer. The catalog may pin ^3.10.0, in which case the override is
-    // what lifts the tree to 4.x — "(unused)" would be a destructive verdict.
-    const lockfile = makeLockfile({});
-    const direct = makeWorkspaceDirectDeps({ lodash: "catalog:" });
-    const result = evaluateOverride(
-      PKG_OVERRIDE("lodash", ">=4.17.21"),
-      lockfile,
-      direct,
-      new Map(),
-    );
-    expect(result).toEqual({
-      status: "skip",
-      value: "(constrained by catalog: spec)",
-    });
-  });
-
-  it("skips even when other specs exist, since the protocol spec's range is unknown", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        target: [{ parent: "parentA@1.0.0", resolved: "2.0.0" }],
-      },
-    });
-    const direct: WorkspaceDirectDeps = new Map([
-      [
-        "target",
-        [
-          {
-            importerKey: "packages/a",
-            depType: "dependencies",
-            spec: "^2.0.0",
-          },
-          {
-            importerKey: "packages/b",
-            depType: "dependencies",
-            spec: "workspace:*",
-          },
-          {
-            importerKey: "packages/c",
-            depType: "dependencies",
-            spec: "catalog:",
-          },
-        ],
-      ],
-    ]);
-    const registry = new Map<string, PackageMetadata>([
-      ["target", makeMetadata("target", { "2.0.0": {} })],
-      ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=2.0.0" } })],
-    ]);
-    const result = evaluateOverride(
-      PKG_OVERRIDE("target", ">=2.0.0"),
-      lockfile,
-      direct,
-      registry,
-    );
-    expect(result).toEqual({
-      status: "skip",
-      value: "(constrained by workspace:, catalog: spec)",
-    });
+  it("keeps protocol-constrained overrides for review and lists each protocol once in encounter order", () => {
+    const protocols = [
+      ["catalog:default", "catalog:"],
+      ["workspace:*", "workspace:"],
+      ["file:../a[1]/日本語*?", "file:"],
+      ["link:../a:b", "link:"],
+      ["portal:../local", "portal:"],
+      ["npm:@scope/pkg@^2.0.0", "npm:"],
+      ["github:user/repo", "github:"],
+      ["git:repo", "git:"],
+      ["git+ssh://host/repo.git", "git+ssh:"],
+      ["http://host/pkg.tgz", "http:"],
+      ["https://host/pkg.tgz", "https:"],
+    ] as const;
+    for (const first of protocols) {
+      for (const second of [null, ...protocols]) {
+        const pair = second === null ? [first] : [first, second];
+        for (const ordered of [pair, pair.toReversed()]) {
+          const labels = ordered.map(([, label]) => label);
+          const expectedLabels =
+            labels[0] === labels[1] ? labels.slice(0, 1) : labels;
+          for (const hasOtherConstraints of [false, true]) {
+            const specs: string[] = [...ordered, ...ordered].map(
+              ([spec]) => spec,
+            );
+            if (hasOtherConstraints) {
+              specs.unshift("^2.0.0");
+            }
+            const direct: WorkspaceDirectDeps = new Map([
+              [
+                "target",
+                specs.map((spec, index) => ({
+                  importerKey: `packages/${index}`,
+                  depType: "dependencies" as const,
+                  spec,
+                })),
+              ],
+            ]);
+            const lockfile = makeLockfile(
+              hasOtherConstraints
+                ? {
+                    transitive: {
+                      target: [{ parent: "parentA@1.0.0", resolved: "2.0.0" }],
+                    },
+                  }
+                : {},
+            );
+            const registry = new Map<string, PackageMetadata>(
+              hasOtherConstraints
+                ? [
+                    ["target", makeMetadata("target", { "2.0.0": {} })],
+                    [
+                      "parentA",
+                      makeMetadata("parentA", {
+                        "1.0.0": { target: ">=2.0.0" },
+                      }),
+                    ],
+                  ]
+                : [],
+            );
+            expect(
+              evaluateOverride(
+                PKG_OVERRIDE("target", ">=2.0.0"),
+                lockfile,
+                direct,
+                registry,
+              ),
+            ).toEqual({
+              status: "skip",
+              value: `(constrained by ${expectedLabels.join(", ")} spec)`,
+            });
+          }
+        }
+      }
+    }
   });
 
   it("skips versioned keys with non-semver-range selector", () => {
