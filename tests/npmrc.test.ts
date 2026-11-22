@@ -90,26 +90,38 @@ describe("parseNpmrc", () => {
 });
 
 describe("userNpmrcPath", () => {
-  it("defaults to .npmrc in the home directory", () => {
-    expect(userNpmrcPath({}, "/home/me")).toBe("/home/me/.npmrc");
-  });
-
-  it("honors npm_config_userconfig", () => {
-    expect(
-      userNpmrcPath({ npm_config_userconfig: "/tmp/ci/.npmrc" }, "/home/me"),
-    ).toBe("/tmp/ci/.npmrc");
-  });
-
-  it("matches the environment key case-insensitively", () => {
-    expect(
-      userNpmrcPath({ NPM_CONFIG_USERCONFIG: "/tmp/ci/.npmrc" }, "/home/me"),
-    ).toBe("/tmp/ci/.npmrc");
-  });
-
-  it("ignores an empty override", () => {
-    expect(userNpmrcPath({ npm_config_userconfig: "" }, "/home/me")).toBe(
-      "/home/me/.npmrc",
-    );
+  it("selects the configured path independently of key casing, home, and unrelated environment entries", () => {
+    const homes = [
+      ["/home/me", "/home/me/.npmrc"],
+      ["/home/日本語 dir", "/home/日本語 dir/.npmrc"],
+      ["/", "/.npmrc"],
+    ] as const;
+    for (const [home, fallback] of homes) {
+      for (const key of [
+        "npm_config_userconfig",
+        "NPM_CONFIG_USERCONFIG",
+        "NpM_CoNfIg_UsErCoNfIg",
+      ]) {
+        for (const [configured, expected] of [
+          [undefined, fallback],
+          ["", fallback],
+          ["/tmp/ci/.npmrc", "/tmp/ci/.npmrc"],
+          ["設定 dir/[local]#?.npmrc", "設定 dir/[local]#?.npmrc"],
+        ] as const) {
+          const fields = [
+            ["npm_config_registry", "https://registry.example.test/"],
+            ["npm_config_userconfig_extra", "wrong-suffix"],
+            ["other_npm_config_userconfig", "wrong-prefix"],
+            ...(configured === undefined ? [] : [[key, configured] as const]),
+          ] as const;
+          for (const ordered of [fields, fields.toReversed()]) {
+            expect(userNpmrcPath(Object.fromEntries(ordered), home)).toBe(
+              expected,
+            );
+          }
+        }
+      }
+    }
   });
 });
 
