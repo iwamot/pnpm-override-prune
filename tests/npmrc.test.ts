@@ -113,42 +113,66 @@ describe("userNpmrcPath", () => {
 });
 
 describe("buildRegistryConfig", () => {
-  it("falls back to the public registry with no configuration", () => {
-    const config = buildRegistryConfig({
-      env: {},
-      projectNpmrc: null,
-      userNpmrc: null,
-    });
-    expect(config.defaultRegistry).toBe(DEFAULT_REGISTRY);
-    expect(config.entries.size).toBe(0);
-  });
-
-  it("prefers the environment over the project and user files", () => {
-    const config = buildRegistryConfig({
-      env: { NPM_CONFIG_REGISTRY: "https://env.example.com/" },
-      projectNpmrc: "registry=https://project.example.com/",
-      userNpmrc: "registry=https://user.example.com/",
-    });
-    expect(config.defaultRegistry).toBe("https://env.example.com");
-  });
-
-  it("prefers the project file over the user file", () => {
-    const config = buildRegistryConfig({
-      env: {},
-      projectNpmrc: "registry=https://project.example.com/",
-      userNpmrc: "registry=https://user.example.com/",
-    });
-    expect(config.defaultRegistry).toBe("https://project.example.com");
-  });
-
-  it("uses the user file when the project file has no registry", () => {
-    const config = buildRegistryConfig({
-      env: {},
-      projectNpmrc: "save-exact=true",
-      userNpmrc: "registry=https://user.example.com",
-    });
-    expect(config.defaultRegistry).toBe("https://user.example.com");
-    expect(config.entries.get("save-exact")).toBe("true");
+  it("merges each key with project precedence and lets the environment select the default registry", () => {
+    const settings = [
+      ["registry", "https://user.example.com", "https://project.example.com/"],
+      [
+        "@myorg:registry",
+        "https://user-scope.example.com/",
+        "https://project-scope.example.com/",
+      ],
+      ["//host/:_authToken", "user-token", "project-token"],
+      ["save-exact", "false", "true"],
+    ] as const;
+    const environments = [
+      {},
+      { npm_config_registry: "https://env.example.com" },
+      { NPM_CONFIG_REGISTRY: "https://env.example.com/" },
+      { NpM_CoNfIg_ReGiStRy: "https://env.example.com/" },
+    ];
+    for (let mask = 0; mask < 2 ** (settings.length * 2); mask++) {
+      const user = Object.fromEntries(
+        settings.flatMap(([key, value], index) =>
+          (mask & (1 << index)) === 0 ? [] : [[key, value] as const],
+        ),
+      );
+      const project = Object.fromEntries(
+        settings.flatMap(([key, , value], index) =>
+          (mask & (1 << (index + settings.length))) === 0
+            ? []
+            : [[key, value] as const],
+        ),
+      );
+      // Record overlay defines precedence without sharing the merge implementation.
+      const expectedEntries = { ...user, ...project };
+      const fileRegistry = project.registry ?? user.registry;
+      for (const [envIndex, env] of environments.entries()) {
+        const expectedRegistry =
+          envIndex === 0
+            ? (fileRegistry?.replace(/\/$/, "") ?? DEFAULT_REGISTRY)
+            : "https://env.example.com";
+        for (const reversed of [false, true]) {
+          const text = (entries: Record<string, string>) => {
+            const pairs = Object.entries(entries);
+            const lines = (reversed ? pairs.toReversed() : pairs).map(
+              ([key, value]) => `${key}=${value}`,
+            );
+            return lines.length === 0
+              ? reversed
+                ? ""
+                : null
+              : lines.join("\n");
+          };
+          const config = buildRegistryConfig({
+            env,
+            projectNpmrc: text(project),
+            userNpmrc: text(user),
+          });
+          expect(config.defaultRegistry).toBe(expectedRegistry);
+          expect(Object.fromEntries(config.entries)).toEqual(expectedEntries);
+        }
+      }
+    }
   });
 
   it("rejects a default registry that is not a URL", () => {
