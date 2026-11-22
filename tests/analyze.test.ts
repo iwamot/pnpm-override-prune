@@ -159,82 +159,40 @@ describe("categorize", () => {
     }
   });
 
-  it("skips nested keys", () => {
-    expect(categorize("foo>bar", ">=1.0.0")).toEqual({
-      kind: "skip",
-      reason: "nested-key",
-    });
-  });
-
-  it("skips when selector is a dist-tag", () => {
-    expect(categorize("foo@latest", ">=1.0.0")).toEqual({
-      kind: "skip",
-      reason: "unsupported-selector",
-    });
-  });
-
-  it("skips when selector is non-semver garbage", () => {
-    expect(categorize("foo@my-fork", ">=1.0.0")).toEqual({
-      kind: "skip",
-      reason: "unsupported-selector",
-    });
-  });
-
-  it("skips protocol specs", () => {
-    expect(categorize("foo", "catalog:default")).toEqual({
-      kind: "skip",
-      reason: "protocol-spec",
-    });
-  });
-
-  it("skips exact pins", () => {
-    expect(categorize("foo", "1.0.0")).toEqual({
-      kind: "skip",
-      reason: "non-lower-bound",
-    });
-  });
-
-  it("skips caret ranges", () => {
-    expect(categorize("foo", "^1.0.0")).toEqual({
-      kind: "skip",
-      reason: "non-lower-bound",
-    });
-  });
-
-  it("skips versioned key with non-lower-bound spec", () => {
-    expect(categorize("lodash@<4.17.21", "^4.17.21")).toEqual({
-      kind: "skip",
-      reason: "non-lower-bound",
-    });
-  });
-
-  it("nested-key takes precedence over protocol", () => {
-    expect(categorize("foo>bar", "workspace:*")).toEqual({
-      kind: "skip",
-      reason: "nested-key",
-    });
-  });
-
-  it("nested-key takes precedence over selector parse", () => {
-    // 'foo>bar@1.0.0' has '>' so it's nested first.
-    expect(categorize("foo>bar@1.0.0", ">=1.0.0")).toEqual({
-      kind: "skip",
-      reason: "nested-key",
-    });
-  });
-
-  it("unsupported-selector takes precedence over protocol-spec", () => {
-    expect(categorize("foo@latest", "catalog:default")).toEqual({
-      kind: "skip",
-      reason: "unsupported-selector",
-    });
-  });
-
-  it("protocol takes precedence over non-lower-bound check", () => {
-    expect(categorize("foo", "catalog:default")).toEqual({
-      kind: "skip",
-      reason: "protocol-spec",
-    });
+  it("prioritizes key restrictions over spec restrictions for every combination", () => {
+    const keys = [
+      ["foo", null],
+      ["@scope/pkg", null],
+      ["lodash@<4.17.21", null],
+      ["foo>bar", "nested-key"],
+      ["foo>bar@1.0.0", "nested-key"],
+      ["foo>bar@latest", "nested-key"],
+      ["foo@latest", "unsupported-selector"],
+      ["foo@my-fork", "unsupported-selector"],
+    ] as const;
+    const specs = [
+      [">=1.0.0", null],
+      [">2.0.0", null],
+      ["catalog:default", "protocol-spec"],
+      ["workspace:*", "protocol-spec"],
+      ["npm:@scope/pkg@^1.0.0", "protocol-spec"],
+      ["1.0.0", "non-lower-bound"],
+      ["^1.0.0", "non-lower-bound"],
+      ["^4.17.21", "non-lower-bound"],
+      ["~2.0.0", "non-lower-bound"],
+      ["not-a-version", "non-lower-bound"],
+    ] as const;
+    for (const [key, keyReason] of keys) {
+      for (const [spec, specReason] of specs) {
+        const reason = keyReason ?? specReason;
+        const result = categorize(key, spec);
+        if (reason === null) {
+          expect(result.kind).toBe("target");
+        } else {
+          expect(result).toEqual({ kind: "skip", reason });
+        }
+      }
+    }
   });
 });
 
