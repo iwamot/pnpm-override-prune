@@ -16,7 +16,7 @@ import type { PackageMetadata, PackageVersionMeta } from "../src/registry.ts";
 import { createReleasePolicy } from "../src/release-age.ts";
 
 function makeLockfile(args: {
-  transitive?: Record<string, Array<{ parent: string; resolved: string }>>;
+  transitive?: Record<string, readonly { parent: string; resolved: string }[]>;
 }): Lockfile {
   const transMap = new Map<
     string,
@@ -280,16 +280,6 @@ describe("evaluateOverride", () => {
     }
   });
 
-  it("prunes entries with no surviving constraints (unused)", () => {
-    const result = evaluateOverride(
-      PKG_OVERRIDE("foo", ">=1.0.0"),
-      makeLockfile({}),
-      NO_DIRECT,
-      new Map(),
-    );
-    expect(result).toEqual({ status: "prune", value: "(unused)" });
-  });
-
   it("reports every relevant fetch failure before issuing a verdict and ignores unrelated failures", () => {
     const parents = ["parentA", "@scope/parentB"];
     const contexts = [
@@ -471,7 +461,7 @@ describe("evaluateOverride", () => {
       [">=2.0.0", 2],
       [">=3.0.0", 4],
     ] as const;
-    for (let mask = 1; mask < 2 ** requirements.length; mask++) {
+    for (let mask = 0; mask < 2 ** requirements.length; mask++) {
       const selected = requirements.flatMap((entry, index) =>
         (mask & (1 << index)) !== 0 ? [{ ...entry, index }] : [],
       );
@@ -506,6 +496,7 @@ describe("evaluateOverride", () => {
               ] as const,
           ),
         ]);
+        if (selected.length === 0) registry.delete("foo");
         const direct: WorkspaceDirectDeps = transitive
           ? NO_DIRECT
           : new Map([
@@ -526,7 +517,11 @@ describe("evaluateOverride", () => {
           for (const [spec, floor] of floors) {
             const expected =
               matching.length === 0
-                ? { status: "prune" as const, value: "(selector miss)" }
+                ? {
+                    status: "prune" as const,
+                    value:
+                      selected.length === 0 ? "(unused)" : "(selector miss)",
+                  }
                 : {
                     status:
                       rank >= floor ? ("prune" as const) : ("keep" as const),
@@ -730,12 +725,15 @@ describe("registry package collection", () => {
           (target) =>
             [
               target,
-              selected
-                .filter((edge) => edge.target === target)
-                .map((edge) => ({
-                  parent: `${edge.parent}@${edge.version}(peer@4.0.0)`,
-                  resolved: "1.0.0",
-                })),
+              [
+                { parent: "broken-no-at", resolved: "1.0.0" },
+                ...selected
+                  .filter((edge) => edge.target === target)
+                  .map((edge) => ({
+                    parent: `${edge.parent}@${edge.version}(peer@4.0.0)`,
+                    resolved: "1.0.0",
+                  })),
+              ],
             ] as const,
         ),
       );
@@ -772,33 +770,6 @@ describe("registry package collection", () => {
         }
       }
     }
-  });
-});
-
-describe("collectPackagesForOverride", () => {
-  it("ignores parents whose snapshot key cannot be parsed", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        foo: [{ parent: "broken-no-at", resolved: "1.0.0" }],
-      },
-    });
-    expect(
-      collectPackagesForOverride(PKG_OVERRIDE("foo", ">=1.0.0"), lockfile),
-    ).toEqual(["foo"]);
-  });
-});
-
-describe("collectNeededRegistryPackages", () => {
-  it("skips parents whose snapshot keys can't be parsed", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        foo: [{ parent: "broken-no-at", resolved: "1.0.0" }],
-      },
-    });
-    const overrides: Override[] = [PKG_OVERRIDE("foo", ">=1.0.0")];
-    expect(new Set(collectNeededRegistryPackages(overrides, lockfile))).toEqual(
-      new Set(["foo"]),
-    );
   });
 });
 
