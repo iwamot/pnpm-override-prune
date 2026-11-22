@@ -9,51 +9,45 @@ import {
 } from "../src/npmrc.ts";
 
 describe("parseNpmrc", () => {
-  it("reads key=value lines and skips comments, blanks, and sections", () => {
-    const text = [
-      "# comment",
-      "; another comment",
-      "",
-      "[section]",
-      "registry = https://example.com/npm/",
-      "no-equals-sign",
-      "save-exact=true",
-    ].join("\n");
-    expect(parseNpmrc(text, {})).toEqual(
-      new Map([
-        ["registry", "https://example.com/npm/"],
-        ["save-exact", "true"],
-      ]),
-    );
-  });
-
-  it("handles CRLF line endings", () => {
-    expect(parseNpmrc("a=1\r\nb=2\r\n", {})).toEqual(
-      new Map([
-        ["a", "1"],
-        ["b", "2"],
-      ]),
-    );
-  });
-
-  it("strips matching surrounding quotes from values", () => {
-    const text = ['a="quoted"', "b='single'", "c=\"mismatched'", 'd=""'].join(
-      "\n",
-    );
-    expect(parseNpmrc(text, {})).toEqual(
-      new Map([
-        ["a", "quoted"],
-        ["b", "single"],
-        ["c", "\"mismatched'"],
-        ["d", ""],
-      ]),
-    );
-  });
-
-  it("keeps everything after the first equals sign in the value", () => {
-    expect(parseNpmrc("//host/:_authToken=abc=def", {})).toEqual(
-      new Map([["//host/:_authToken", "abc=def"]]),
-    );
+  it("recovers each selected setting across equivalent ini encodings", () => {
+    const entries = [
+      ["registry", "https://example.com/npm/?mirror=a=b"],
+      ["//host/:_authToken", "abc=def"],
+      ["save-exact", "true"],
+      ["empty", ""],
+      ["mismatched", "\"mismatched'"],
+      ["unicode", "日本語 MixedCase=Value"],
+    ] as const;
+    for (let mask = 0; mask < 2 ** entries.length; mask++) {
+      const selected = entries.filter(
+        (_, index) => (mask & (1 << index)) !== 0,
+      );
+      for (const ordered of [selected, selected.toReversed()]) {
+        for (const quote of ["", '"', "'"]) {
+          for (const space of ["", " ", "\t"]) {
+            const ignored = [
+              "# ignored=value",
+              "; ignored=value",
+              "",
+              "[section=ignored]",
+              "no-equals-sign",
+            ];
+            const lines = [
+              ...ignored,
+              ...ordered.flatMap(([key, value]) => [
+                `${space}${key}${space}=${space}${quote}${value}${quote}${space}`,
+                ...ignored,
+              ]),
+            ].map((line) => space + line + space);
+            for (const newline of ["\n", "\r\n"]) {
+              expect(parseNpmrc(lines.join(newline), {})).toEqual(
+                new Map(selected),
+              );
+            }
+          }
+        }
+      }
+    }
   });
 
   it("expands a variable reference from the environment", () => {
