@@ -89,54 +89,37 @@ describe("override key structure", () => {
 });
 
 describe("hasProtocolPrefix", () => {
-  it("detects catalog:", () => {
-    expect(hasProtocolPrefix("catalog:default")).toBe(true);
-  });
-
-  it("detects workspace:", () => {
-    expect(hasProtocolPrefix("workspace:*")).toBe(true);
-  });
-
-  it("detects file:", () => {
-    expect(hasProtocolPrefix("file:./local")).toBe(true);
-  });
-
-  it("detects link:", () => {
-    expect(hasProtocolPrefix("link:./local")).toBe(true);
-  });
-
-  it("detects portal:", () => {
-    expect(hasProtocolPrefix("portal:./local")).toBe(true);
-  });
-
-  it("detects npm:", () => {
-    expect(hasProtocolPrefix("npm:foo@1.0.0")).toBe(true);
-  });
-
-  it("detects github:", () => {
-    expect(hasProtocolPrefix("github:user/repo")).toBe(true);
-  });
-
-  it("detects git:", () => {
-    expect(hasProtocolPrefix("git:foo")).toBe(true);
-  });
-
-  it("detects git+", () => {
-    expect(hasProtocolPrefix("git+https://example.com/repo.git")).toBe(true);
-  });
-
-  it("detects http:", () => {
-    expect(hasProtocolPrefix("http://example.com/foo.tgz")).toBe(true);
-  });
-
-  it("detects https:", () => {
-    expect(hasProtocolPrefix("https://example.com/foo.tgz")).toBe(true);
-  });
-
-  it("ignores plain semver", () => {
-    expect(hasProtocolPrefix("1.0.0")).toBe(false);
-    expect(hasProtocolPrefix(">=1.0.0")).toBe(false);
-    expect(hasProtocolPrefix("^1.0.0")).toBe(false);
+  it("recognizes complete protocol prefixes independently of payload and rejects misplaced or incomplete prefixes", () => {
+    const protocols = [
+      "catalog:",
+      "workspace:",
+      "file:",
+      "link:",
+      "portal:",
+      "npm:",
+      "github:",
+      "git:",
+      "git+",
+      "http:",
+      "https:",
+    ];
+    for (const prefix of protocols) {
+      for (const payload of [
+        "",
+        "*",
+        "default",
+        "./local",
+        "@scope/pkg@^1.0.0",
+        "https://example.com/pkg.tgz",
+      ]) {
+        expect(hasProtocolPrefix(prefix + payload)).toBe(true);
+        expect(hasProtocolPrefix("x-" + prefix + payload)).toBe(false);
+        expect(hasProtocolPrefix(prefix.slice(0, -1) + payload)).toBe(false);
+      }
+    }
+    for (const spec of ["", "1.0.0", ">=1.0.0", "^1.0.0"]) {
+      expect(hasProtocolPrefix(spec)).toBe(false);
+    }
   });
 });
 
