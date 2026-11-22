@@ -657,41 +657,89 @@ describe("evaluateOverride", () => {
   });
 });
 
-describe("collectPackagesForOverride", () => {
-  it("returns an empty list for skip-categorized overrides", () => {
-    expect(
-      collectPackagesForOverride(
-        PKG_OVERRIDE("foo", "^1.0.0"),
-        makeLockfile({}),
-      ),
-    ).toEqual([]);
-  });
-
-  it("returns just the target when there are no transitive parents", () => {
-    expect(
-      collectPackagesForOverride(
-        PKG_OVERRIDE("foo", ">=1.0.0"),
-        makeLockfile({}),
-      ),
-    ).toEqual(["foo"]);
-  });
-
-  it("includes parent names parsed from snapshot keys", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        foo: [
-          { parent: "parentA@1.0.0", resolved: "1.0.0" },
-          { parent: "parentB@2.0.0", resolved: "1.0.0" },
-        ],
+describe("registry package collection", () => {
+  it("collects exactly the targets and immediate parents of active overrides without duplicates", () => {
+    const targets = ["foo", "@scope/target"];
+    const edges = [
+      { target: "foo", parent: "shared", version: "1.0.0" },
+      { target: "foo", parent: "shared", version: "2.0.0" },
+      { target: "foo", parent: "@scope/parent", version: "2.0.0" },
+      { target: "@scope/target", parent: "shared", version: "1.0.0" },
+      { target: "@scope/target", parent: "foo", version: "3.0.0" },
+    ];
+    const options = (target: string) => [
+      { target, override: null, active: false },
+      { target, override: PKG_OVERRIDE(target, ">=1.0.0"), active: true },
+      {
+        target,
+        override: PKG_OVERRIDE(`${target}@<2.0.0`, ">=1.0.0"),
+        active: true,
       },
-    });
-    expect(
-      new Set(
-        collectPackagesForOverride(PKG_OVERRIDE("foo", ">=1.0.0"), lockfile),
-      ),
-    ).toEqual(new Set(["foo", "parentA", "parentB"]));
+      { target, override: PKG_OVERRIDE(target, "^1.0.0"), active: false },
+      {
+        target,
+        override: PKG_OVERRIDE(`${target}>child`, ">=1.0.0"),
+        active: false,
+      },
+      { target, override: PKG_OVERRIDE(target, "workspace:*"), active: false },
+      {
+        target,
+        override: PKG_OVERRIDE(`${target}@latest`, ">=1.0.0"),
+        active: false,
+      },
+    ];
+    for (let mask = 0; mask < 2 ** edges.length; mask++) {
+      const selected = edges.filter((_, index) => (mask & (1 << index)) !== 0);
+      const transitive = Object.fromEntries(
+        targets.map(
+          (target) =>
+            [
+              target,
+              selected
+                .filter((edge) => edge.target === target)
+                .map((edge) => ({
+                  parent: `${edge.parent}@${edge.version}(peer@4.0.0)`,
+                  resolved: "1.0.0",
+                })),
+            ] as const,
+        ),
+      );
+      const lockfile = makeLockfile({ transitive });
+      for (const first of options("foo")) {
+        for (const second of options("@scope/target")) {
+          const expected = new Set<string>();
+          const overrides: Override[] = [];
+          for (const { target, override, active } of [first, second]) {
+            if (override === null) continue;
+            overrides.push(override);
+            const names = active
+              ? [
+                  target,
+                  ...selected
+                    .filter((edge) => edge.target === target)
+                    .map((edge) => edge.parent),
+                ]
+              : [];
+            const own = collectPackagesForOverride(override, lockfile);
+            expect(new Set(own)).toEqual(new Set(names));
+            expect(own).toHaveLength(new Set(names).size);
+            for (const name of names) expected.add(name);
+          }
+          for (const ordered of [
+            overrides,
+            [...overrides].reverse().concat(overrides),
+          ]) {
+            const actual = collectNeededRegistryPackages(ordered, lockfile);
+            expect(new Set(actual)).toEqual(expected);
+            expect(actual).toHaveLength(expected.size);
+          }
+        }
+      }
+    }
   });
+});
 
+describe("collectPackagesForOverride", () => {
   it("ignores parents whose snapshot key cannot be parsed", () => {
     const lockfile = makeLockfile({
       transitive: {
@@ -705,45 +753,6 @@ describe("collectPackagesForOverride", () => {
 });
 
 describe("collectNeededRegistryPackages", () => {
-  it("includes target and parent names for each target override", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        foo: [
-          { parent: "parentA@1.0.0", resolved: "1.0.0" },
-          { parent: "parentB@2.0.0", resolved: "1.0.0" },
-        ],
-      },
-    });
-    const overrides: Override[] = [PKG_OVERRIDE("foo", ">=1.0.0")];
-    const needed = collectNeededRegistryPackages(overrides, lockfile);
-    expect(new Set(needed)).toEqual(new Set(["foo", "parentA", "parentB"]));
-  });
-
-  it("skips overrides categorized as skip", () => {
-    const overrides: Override[] = [
-      PKG_OVERRIDE("foo>bar", ">=1.0.0"),
-      PKG_OVERRIDE("baz", "^1.0.0"),
-    ];
-    expect(collectNeededRegistryPackages(overrides, makeLockfile({}))).toEqual(
-      [],
-    );
-  });
-
-  it("dedupes when the same parent appears across overrides", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        foo: [{ parent: "parentA@1.0.0", resolved: "1.0.0" }],
-        bar: [{ parent: "parentA@1.0.0", resolved: "2.0.0" }],
-      },
-    });
-    const overrides: Override[] = [
-      PKG_OVERRIDE("foo", ">=1.0.0"),
-      PKG_OVERRIDE("bar", ">=2.0.0"),
-    ];
-    const needed = collectNeededRegistryPackages(overrides, lockfile);
-    expect(new Set(needed)).toEqual(new Set(["foo", "bar", "parentA"]));
-  });
-
   it("skips parents whose snapshot keys can't be parsed", () => {
     const lockfile = makeLockfile({
       transitive: {
@@ -754,13 +763,6 @@ describe("collectNeededRegistryPackages", () => {
     expect(new Set(collectNeededRegistryPackages(overrides, lockfile))).toEqual(
       new Set(["foo"]),
     );
-  });
-
-  it("handles target without transitive parents", () => {
-    const overrides: Override[] = [PKG_OVERRIDE("foo", ">=1.0.0")];
-    expect(collectNeededRegistryPackages(overrides, makeLockfile({}))).toEqual([
-      "foo",
-    ]);
   });
 });
 
