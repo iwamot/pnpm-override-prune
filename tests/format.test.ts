@@ -46,27 +46,29 @@ describe("SOURCE_ORDER", () => {
   });
 });
 
-describe("entryDisplay", () => {
-  it("joins key and spec with a space", () => {
-    expect(entryDisplay(PKG("@xmldom/xmldom", ">=0.9.10"))).toBe(
-      "@xmldom/xmldom >=0.9.10",
-    );
-  });
-});
-
-describe("entryWidth", () => {
-  it("returns 0 for empty list", () => {
-    expect(entryWidth([])).toBe(0);
-  });
-
-  it("returns the max display length", () => {
-    expect(
-      entryWidth([
-        PKG("a", ">=1.0.0"),
-        PKG("longer-name", ">=1.0.0"),
-        PKG("b", ">=1.0.0"),
-      ]),
-    ).toBe("longer-name >=1.0.0".length);
+describe("entry display and width", () => {
+  it("preserves each display and selects the widest entry independently of order and repetition", () => {
+    // Explicit widths are ordered independently of the display implementation.
+    const entries = [
+      [PKG("a", ">=1.0.0"), "a >=1.0.0", 9],
+      [PKG("b", ">=100.200.300"), "b >=100.200.300", 15],
+      [PKG("longer-name", ">=1.0.0"), "longer-name >=1.0.0", 19],
+      [PKG("@xmldom/xmldom", ">=0.9.10"), "@xmldom/xmldom >=0.9.10", 23],
+    ] as const;
+    for (const [entry, display] of entries) {
+      expect(entryDisplay(entry)).toBe(display);
+    }
+    for (let mask = 0; mask < 2 ** entries.length; mask++) {
+      const selected = entries.filter(
+        (_, index) => (mask & (1 << index)) !== 0,
+      );
+      const expected = selected.at(-1)?.[2] ?? 0;
+      const overrides = selected.map(([entry]) => entry);
+      for (const ordered of [overrides, overrides.toReversed()]) {
+        expect(entryWidth(ordered)).toBe(expected);
+        expect(entryWidth([...ordered, ...ordered])).toBe(expected);
+      }
+    }
   });
 });
 
