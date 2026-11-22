@@ -301,40 +301,48 @@ describe("buildWorkspaceDirectDeps", () => {
 });
 
 describe("parseWorkspaceReleaseAge", () => {
-  it("falls back to pnpm's default when the workspace file sets nothing", () => {
-    expect(parseWorkspaceReleaseAge("packages:\n  - apps/*\n")).toEqual(
-      DEFAULT_RELEASE_AGE_SETTINGS,
-    );
+  it("preserves independent release-age settings across combinations and document layouts", () => {
+    const ages = [
+      [[], 1440],
+      [[["minimumReleaseAge", 0]], 0],
+      [[["minimumReleaseAge", 60]], 60],
+      [[["minimumReleaseAge", 2880]], 2880],
+      [[["minimumReleaseAge", "soon"]], 1440],
+    ] as const;
+    const exclusions = [
+      [[], []],
+      [[["minimumReleaseAgeExclude", "webpack"]], ["webpack"]],
+      [[["minimumReleaseAgeExclude", ""]], [""]],
+      [[["minimumReleaseAgeExclude", []]], []],
+      [
+        [["minimumReleaseAgeExclude", ["webpack", "@myorg/*", 7, "webpack"]]],
+        ["webpack", "@myorg/*", "webpack"],
+      ],
+    ] as const;
     expect(parseWorkspaceReleaseAge("")).toEqual(DEFAULT_RELEASE_AGE_SETTINGS);
-  });
-
-  it("reads the minimum and an exclude list", () => {
-    const yaml = [
-      "minimumReleaseAge: 60",
-      "minimumReleaseAgeExclude:",
-      "  - webpack",
-      "  - '@myorg/*'",
-      "  - 7",
-    ].join("\n");
-    expect(parseWorkspaceReleaseAge(yaml)).toEqual({
-      minimumReleaseAge: 60,
-      minimumReleaseAgeExclude: ["webpack", "@myorg/*"],
-    });
-  });
-
-  it("accepts a single scalar as the exclude list", () => {
-    expect(
-      parseWorkspaceReleaseAge("minimumReleaseAgeExclude: webpack\n"),
-    ).toEqual({
-      minimumReleaseAge: 1440,
-      minimumReleaseAgeExclude: ["webpack"],
-    });
-  });
-
-  it("keeps the default when the minimum is not a number", () => {
-    expect(
-      parseWorkspaceReleaseAge("minimumReleaseAge: soon\n").minimumReleaseAge,
-    ).toBe(1440);
+    for (const [ageFields, minimumReleaseAge] of ages) {
+      for (const [excludeFields, minimumReleaseAgeExclude] of exclusions) {
+        const fields = [
+          ...ageFields,
+          ...excludeFields,
+          ["packages", ["apps/*"]],
+          [
+            "custom",
+            { minimumReleaseAge: 9999, minimumReleaseAgeExclude: ["decoy"] },
+          ],
+        ] as const;
+        const expected = { minimumReleaseAge, minimumReleaseAgeExclude };
+        for (const ordered of [fields, fields.toReversed()]) {
+          const document = Object.fromEntries(ordered);
+          for (const content of [
+            stringify(document),
+            JSON.stringify(document),
+          ]) {
+            expect(parseWorkspaceReleaseAge(content)).toEqual(expected);
+          }
+        }
+      }
+    }
   });
 
   it("rejects unparseable yaml", () => {
