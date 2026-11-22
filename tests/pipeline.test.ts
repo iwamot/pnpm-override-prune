@@ -542,20 +542,100 @@ describe("evaluateOverride", () => {
     expect(result).toEqual({ status: "skip", value: "(unsupported selector)" });
   });
 
-  it("prunes versioned key when no parent spec intersects the selector", () => {
-    const lockfile = makeLockfile({});
-    // Workspace requests lodash ^5.0.0; selector is <4.17.21 — disjoint.
-    const direct = makeWorkspaceDirectDeps({ lodash: "^5.0.0" });
-    const registry = new Map<string, PackageMetadata>([
-      ["lodash", makeMetadata("lodash", { "5.0.0": {} })],
-    ]);
-    const result = evaluateOverride(
-      PKG_OVERRIDE("lodash@<4.17.21", ">=4.17.21"),
-      lockfile,
-      direct,
-      registry,
-    );
-    expect(result).toEqual({ status: "prune", value: "(selector miss)" });
+  it("uses selectors to choose constraints and compares their natural resolution with each override floor", () => {
+    const versions = ["1.0.0", "1.5.0", "2.0.0", "2.5.0"];
+    const requirements = [
+      { spec: "^1.0.0", rank: 1 },
+      { spec: "^2.0.0", rank: 3 },
+      { spec: "1.0.0", rank: 0 },
+    ];
+    // Range intersections are specified independently of semver.intersects.
+    const selectors = [
+      ["<1.2.0", [0, 2]],
+      [">=1.2.0 <2.0.0", [0]],
+      ["^2.0.0", [1]],
+      ["<1.0.0", []],
+      ["1.0.0 || 2.0.0", [0, 1, 2]],
+    ] as const;
+    const floors = [
+      [">=1.0.0", 0],
+      [">=1.5.0", 1],
+      [">=2.0.0", 2],
+      [">=3.0.0", 4],
+    ] as const;
+    for (let mask = 1; mask < 2 ** requirements.length; mask++) {
+      const selected = requirements.flatMap((entry, index) =>
+        (mask & (1 << index)) !== 0 ? [{ ...entry, index }] : [],
+      );
+      for (const transitive of [false, true]) {
+        const lockfile = makeLockfile(
+          transitive
+            ? {
+                transitive: {
+                  foo: selected.map(({ index }) => ({
+                    parent: `parent${index}@1.0.0`,
+                    resolved: "1.0.0",
+                  })),
+                },
+              }
+            : {},
+        );
+        const registry = new Map<string, PackageMetadata>([
+          [
+            "foo",
+            makeMetadata(
+              "foo",
+              Object.fromEntries(
+                versions.map((version) => [version, {}] as const),
+              ),
+            ),
+          ],
+          ...selected.map(
+            ({ spec, index }) =>
+              [
+                `parent${index}`,
+                makeMetadata(`parent${index}`, { "1.0.0": { foo: spec } }),
+              ] as const,
+          ),
+        ]);
+        const direct: WorkspaceDirectDeps = transitive
+          ? NO_DIRECT
+          : new Map([
+              [
+                "foo",
+                selected.map(({ spec, index }) => ({
+                  importerKey: `packages/${index}`,
+                  depType: "dependencies" as const,
+                  spec,
+                })),
+              ],
+            ]);
+        for (const [selector, matches] of selectors) {
+          const matching = selected.filter(({ index }) =>
+            matches.some((match) => match === index),
+          );
+          const rank = Math.min(...matching.map((entry) => entry.rank));
+          for (const [spec, floor] of floors) {
+            const expected =
+              matching.length === 0
+                ? { status: "prune" as const, value: "(selector miss)" }
+                : {
+                    status:
+                      rank >= floor ? ("prune" as const) : ("keep" as const),
+                    value: versions[rank] ?? "",
+                  };
+            expect(
+              evaluateOverride(
+                PKG_OVERRIDE(`foo@${selector}`, spec),
+                lockfile,
+                direct,
+                registry,
+              ),
+            ).toEqual(expected);
+          }
+        }
+      }
+    }
   });
 
   it("prunes versioned key when the natural resolution under intersecting specs satisfies the spec", () => {
@@ -582,29 +662,6 @@ describe("evaluateOverride", () => {
       registry,
     );
     expect(result).toEqual({ status: "prune", value: "5.1.5" });
-  });
-
-  it("keeps versioned key when intersecting parent's natural resolution falls below the spec", () => {
-    // Parent pinned to 4.17.10 — only 4.17.10 satisfies. Override demands
-    // >=4.17.23; natural is below, so removal would change the lockfile.
-    const lockfile = makeLockfile({});
-    const direct = makeWorkspaceDirectDeps({ lodash: "4.17.10" });
-    const registry = new Map<string, PackageMetadata>([
-      [
-        "lodash",
-        makeMetadata("lodash", {
-          "4.17.10": {},
-          "4.17.23": {},
-        }),
-      ],
-    ]);
-    const result = evaluateOverride(
-      PKG_OVERRIDE("lodash@>=4.0.0 <=4.17.22", ">=4.17.23"),
-      lockfile,
-      direct,
-      registry,
-    );
-    expect(result).toEqual({ status: "keep", value: "4.17.10" });
   });
 
   it("treats parent specs that fail intersects() as non-matching (prunes when only such specs remain)", () => {
