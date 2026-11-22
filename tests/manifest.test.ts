@@ -198,41 +198,77 @@ describe("parseWorkspaceOverrides", () => {
 });
 
 describe("buildWorkspaceDirectDeps", () => {
-  it("collects direct deps across all importer fields, indexed by name", () => {
-    const root = JSON.stringify({
-      dependencies: { foo: "^1.0.0" },
-      devDependencies: { bar: "2.0.0" },
-      peerDependencies: { baz: ">=3.0.0" },
-      optionalDependencies: { qux: "^4.0.0" },
-    });
-    const result = buildWorkspaceDirectDeps(new Map([[".", root]]));
-    expect(result.get("foo")).toEqual([
-      { importerKey: ".", depType: "dependencies", spec: "^1.0.0" },
-    ]);
-    expect(result.get("bar")).toEqual([
-      { importerKey: ".", depType: "devDependencies", spec: "2.0.0" },
-    ]);
-    expect(result.get("baz")).toEqual([
-      { importerKey: ".", depType: "peerDependencies", spec: ">=3.0.0" },
-    ]);
-    expect(result.get("qux")).toEqual([
-      { importerKey: ".", depType: "optionalDependencies", spec: "^4.0.0" },
-    ]);
-  });
-
-  it("merges entries from multiple importers under the same target name", () => {
-    const a = JSON.stringify({ dependencies: { foo: "1.0.0" } });
-    const b = JSON.stringify({ devDependencies: { foo: "2.0.0" } });
-    const result = buildWorkspaceDirectDeps(
-      new Map([
-        ["packages/a", a],
-        ["packages/b", b],
-      ]),
-    );
-    expect(result.get("foo")).toEqual([
-      { importerKey: "packages/a", depType: "dependencies", spec: "1.0.0" },
-      { importerKey: "packages/b", depType: "devDependencies", spec: "2.0.0" },
-    ]);
+  it("preserves every selected dependency with its importer and dependency type", () => {
+    const paths = [".", "packages/a"];
+    const fields = [
+      "dependencies",
+      "devDependencies",
+      "peerDependencies",
+      "optionalDependencies",
+    ] as const;
+    const edges = [
+      ...paths.flatMap((importerKey, importerIndex) =>
+        fields.map((depType, fieldIndex) => ({
+          importerKey,
+          depType,
+          name: (importerIndex + fieldIndex) % 2 === 0 ? "foo" : "@scope/pkg",
+          spec: `^${importerIndex + 1}.${fieldIndex}.0`,
+        })),
+      ),
+      {
+        importerKey: ".",
+        depType: "dependencies" as const,
+        name: "@scope/pkg",
+        spec: "~3.0.0",
+      },
+    ];
+    for (let mask = 0; mask < 2 ** edges.length; mask++) {
+      const selected = edges.filter((_, index) => (mask & (1 << index)) !== 0);
+      for (const reversed of [false, true]) {
+        const manifests = paths.map((importerKey) => {
+          const groups = fields.map(
+            (depType) =>
+              [
+                depType,
+                Object.fromEntries(
+                  selected
+                    .filter(
+                      (edge) =>
+                        edge.importerKey === importerKey &&
+                        edge.depType === depType,
+                    )
+                    .map(({ name, spec }) => [name, spec] as const),
+                ),
+              ] as const,
+          );
+          return [
+            importerKey,
+            JSON.stringify({
+              name: "workspace-fixture",
+              overrides: { "override-only": ">=99.0.0" },
+              ...Object.fromEntries(reversed ? groups.toReversed() : groups),
+            }),
+          ] as const;
+        });
+        const result = buildWorkspaceDirectDeps(
+          new Map(reversed ? manifests.toReversed() : manifests),
+        );
+        const names = [...new Set(selected.map(({ name }) => name))];
+        expect([...result.keys()].sort()).toEqual(names.sort());
+        for (const name of names) {
+          const expected = selected
+            .filter((edge) => edge.name === name)
+            .map(({ importerKey, depType, spec }) => ({
+              importerKey,
+              depType,
+              spec,
+            }));
+          // Grouping order is immaterial; every constraint must survive exactly once.
+          expect(result.get(name)).toHaveLength(expected.length);
+          expect(result.get(name)).toEqual(expect.arrayContaining(expected));
+        }
+      }
+    }
   });
 
   it("ignores non-string spec values", () => {
