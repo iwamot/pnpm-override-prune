@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   MalformedRegistryResponseError,
   PACKUMENT_ACCEPT,
+  type PackageVersionMeta,
   parsePackageMetadata,
   requestHeaders,
 } from "../src/registry.ts";
@@ -101,65 +102,66 @@ describe("parsePackageMetadata", () => {
     ).toBeNull();
   });
 
-  it("collects dependencies for each published version", () => {
-    const raw = {
-      name: "speech-rule-engine",
-      versions: {
-        "4.1.3": {
-          version: "4.1.3",
-          dependencies: {
-            "@xmldom/xmldom": "0.9.9",
-            commander: "11.1.0",
-          },
-        },
-        "4.1.4": {
-          version: "4.1.4",
-          dependencies: {
-            "@xmldom/xmldom": "0.9.10",
-            commander: "13.1.0",
-          },
-        },
-      },
-    };
-    const meta = parsePackageMetadata(raw, "speech-rule-engine");
-    expect(meta.name).toBe("speech-rule-engine");
-    expect(meta.versions.size).toBe(2);
-    const v413 = meta.versions.get("4.1.3");
-    expect(v413?.version).toBe("4.1.3");
-    expect(v413?.dependencies.get("@xmldom/xmldom")).toBe("0.9.9");
-    expect(meta.versions.get("4.1.4")?.dependencies.get("commander")).toBe(
-      "13.1.0",
-    );
-  });
-
-  it("merges peerDependencies and optionalDependencies into dependencies", () => {
-    const raw = {
-      versions: {
-        "1.0.0": {
-          dependencies: { a: ">=1.0.0" },
-          peerDependencies: { b: ">=2.0.0" },
-          optionalDependencies: { c: ">=3.0.0" },
-        },
-      },
-    };
-    const meta = parsePackageMetadata(raw, "x");
-    const v = meta.versions.get("1.0.0");
-    expect(v?.dependencies.get("a")).toBe(">=1.0.0");
-    expect(v?.dependencies.get("b")).toBe(">=2.0.0");
-    expect(v?.dependencies.get("c")).toBe(">=3.0.0");
-  });
-
-  it("dependencies takes precedence over peerDependencies on overlap", () => {
-    const raw = {
-      versions: {
-        "1.0.0": {
-          dependencies: { a: "^1.0.0" },
-          peerDependencies: { a: "^2.0.0" },
-        },
-      },
-    };
-    const meta = parsePackageMetadata(raw, "x");
-    expect(meta.versions.get("1.0.0")?.dependencies.get("a")).toBe("^1.0.0");
+  it("merges every dependency inventory with normal, peer, then optional priority per version", () => {
+    const fields = [
+      "dependencies",
+      "peerDependencies",
+      "optionalDependencies",
+    ] as const;
+    const names = ["plain", "@scope/pkg"];
+    for (let mask = 0; mask < 2 ** (fields.length * names.length); mask++) {
+      for (const reversed of [false, true]) {
+        const versions: Record<
+          string,
+          Record<string, Record<string, string>>
+        > = {};
+        const expected = new Map<string, PackageVersionMeta>();
+        for (const [index, version] of ["1.0.0", "2.0.0"].entries()) {
+          // Complementary inventories expose accidental sharing across versions.
+          const inventory = index === 0 ? mask : ~mask;
+          const pairs = fields.map(
+            (field, priority) =>
+              [
+                field,
+                Object.fromEntries(
+                  names
+                    .filter(
+                      (_, keyIndex) =>
+                        (inventory &
+                          (1 << (priority * names.length + keyIndex))) !==
+                        0,
+                    )
+                    .map(
+                      (name) =>
+                        [name, `^${index + 1}.${priority + 1}.0`] as const,
+                    ),
+                ),
+              ] as const,
+          );
+          const present = pairs.filter(
+            ([, deps]) => Object.keys(deps).length > 0,
+          );
+          const record = Object.fromEntries(
+            reversed ? present.reverse() : present,
+          );
+          versions[version] = record;
+          expected.set(version, {
+            version,
+            dependencies: new Map(
+              Object.entries({
+                ...record.optionalDependencies,
+                ...record.peerDependencies,
+                ...record.dependencies,
+              }),
+            ),
+            deprecated: false,
+          });
+        }
+        const metadata = parsePackageMetadata({ name: "pkg", versions }, "pkg");
+        expect(metadata.name).toBe("pkg");
+        expect(metadata.versions).toEqual(expected);
+      }
+    }
   });
 
   it("ignores non-mapping dep fields", () => {
@@ -192,16 +194,6 @@ describe("parsePackageMetadata", () => {
     expect(deps?.get("good")).toBe(">=1.0.0");
     expect(deps?.has("weird")).toBe(false);
     expect(deps?.has("alsoWeird")).toBe(false);
-  });
-
-  it("creates an empty dep map when no dep fields are present", () => {
-    const raw = {
-      versions: {
-        "1.0.0": {},
-      },
-    };
-    const meta = parsePackageMetadata(raw, "x");
-    expect(meta.versions.get("1.0.0")?.dependencies.size).toBe(0);
   });
 
   it("ignores version entries that are not mappings", () => {
