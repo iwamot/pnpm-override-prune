@@ -73,15 +73,24 @@ describe("computeNaturalResolution", () => {
 });
 
 describe("pickVersion", () => {
-  it("selects by latest tag, deprecation preference, and semantic version rank", () => {
-    const versions = ["1.0.0", "1.1.0", "2.0.0-beta.1", "2.0.0", "10.0.0"];
+  it("selects by latest tag, skipping deprecated picks, and semantic version rank", () => {
+    const versions = [
+      "1.0.0",
+      "1.1.0",
+      "2.0.0-beta.1",
+      "2.0.0-beta.2",
+      "2.0.0",
+      "10.0.0",
+    ];
+    // The ranks that share a major.minor.patch with each rank, ascending.
+    const releaseRanks = [[0], [1], [2, 3, 4], [2, 3, 4], [2, 3, 4], [5]];
     // Explicit membership keeps the oracle independent of semver parsing.
     const requirements = [
-      { spec: "*", members: [0, 1, 3, 4], tagged: [0, 1, 2, 3, 4] },
+      { spec: "*", members: [0, 1, 4, 5], tagged: [0, 1, 2, 3, 4, 5] },
       { spec: "^1.0.0", members: [0, 1], tagged: [0, 1] },
-      { spec: ">=2.0.0", members: [3, 4], tagged: [3, 4] },
+      { spec: ">=2.0.0", members: [4, 5], tagged: [4, 5] },
       { spec: "~1.1.0", members: [1], tagged: [1] },
-      { spec: ">=2.0.0-beta.1 <2.0.0", members: [2], tagged: [2] },
+      { spec: ">=2.0.0-beta.1 <2.0.0", members: [2, 3], tagged: [2, 3] },
       { spec: "^20.0.0", members: [], tagged: [] },
     ];
     for (let inventory = 0; inventory < 2 ** versions.length; inventory++) {
@@ -101,18 +110,32 @@ describe("pickVersion", () => {
           if (latestRank !== -1 && !present[latestRank]) {
             continue;
           }
+          const fresh = (rank: number): boolean =>
+            present[rank] === true && (deprecatedMask & (1 << rank)) === 0;
           for (const { spec, members, tagged } of requirements) {
-            // A tagged match outranks all alternatives; otherwise prefer fresh
-            // matches, with descending semantic rank as the tie-breaker.
+            // A tagged match is taken unless it is deprecated; a deprecated
+            // pick gives way to the highest fresh match, and under `*` a
+            // prerelease tag gives way to a fresh build of its own release
+            // first. Descending semantic rank breaks ties.
             const descending = members.toReversed();
-            const preference = [
-              ...(tagged.includes(latestRank) ? [latestRank] : []),
-              ...descending.filter(
-                (rank) => (deprecatedMask & (1 << rank)) === 0,
-              ),
-              ...descending,
-            ];
-            const winner = preference.find((rank) => present[rank]);
+            const others = (pick: number): number[] =>
+              descending.filter((rank) => rank !== pick && fresh(rank));
+            let winner: number | undefined;
+            if (tagged.includes(latestRank)) {
+              const siblings =
+                spec === "*" && !members.includes(latestRank)
+                  ? (releaseRanks[latestRank] ?? [])
+                      .filter((rank) => rank !== latestRank && fresh(rank))
+                      .toReversed()
+                  : [];
+              winner = fresh(latestRank)
+                ? latestRank
+                : (siblings[0] ?? others(latestRank)[0] ?? latestRank);
+            } else {
+              const max = descending.find((rank) => present[rank]);
+              winner =
+                max === undefined || fresh(max) ? max : (others(max)[0] ?? max);
+            }
             const expected =
               winner === undefined ? null : (versions[winner] ?? null);
             for (const order of [offered, offered.toReversed()]) {

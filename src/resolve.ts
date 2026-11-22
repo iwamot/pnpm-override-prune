@@ -1,4 +1,4 @@
-import { compare, maxSatisfying, satisfies } from "semver";
+import { compare, major, maxSatisfying, minor, patch, satisfies } from "semver";
 
 /** The versions a spec may resolve to, with what pnpm's picker reads. */
 export interface VersionPool {
@@ -18,25 +18,59 @@ function maxSatisfyingIn(
 /**
  * The version pnpm resolves a range to, given the versions on offer: the
  * `latest` tag when it satisfies the range, otherwise the highest satisfying
- * version, preferring a non-deprecated one when the highest is deprecated.
- * Mirrors pnpm's `pickVersionByVersionRange`.
+ * version. Either pick gives way to a non-deprecated version the range also
+ * allows when it is deprecated itself. Mirrors pnpm's
+ * `pickVersionByVersionRange` from 11.28.13 and 12.23.0, which skip a
+ * deprecated `latest` as well; earlier pnpm and aube keep it, and land on a
+ * version at least as high as this one, so an entry this reads as prunable is
+ * prunable for them too.
  */
 export function pickVersion(spec: string, pool: VersionPool): string | null {
   const latest = pool.latest;
   if (latest !== null && (spec === "*" || satisfies(latest, spec))) {
-    return latest;
+    return nonDeprecatedPick(spec, pool, latest) ?? latest;
   }
   const max = maxSatisfyingIn(pool.versions, spec);
-  if (max !== null && pool.deprecated.has(max) && pool.versions.length > 1) {
-    const alternative = maxSatisfyingIn(
-      pool.versions.filter((v) => !pool.deprecated.has(v)),
-      spec,
-    );
-    if (alternative !== null) {
-      return alternative;
+  if (max === null) {
+    return null;
+  }
+  return nonDeprecatedPick(spec, pool, max) ?? max;
+}
+
+/**
+ * The version pnpm takes instead of a deprecated pick: the highest
+ * non-deprecated one the range allows. A `latest` that is a prerelease
+ * satisfies `*` only because the tag says so, so a sibling build of the same
+ * release is tried first. Null when the pick is not deprecated or nothing
+ * else qualifies.
+ */
+function nonDeprecatedPick(
+  spec: string,
+  pool: VersionPool,
+  picked: string,
+): string | null {
+  if (!pool.deprecated.has(picked) || pool.versions.length <= 1) {
+    return null;
+  }
+  const fresh = pool.versions.filter(
+    (v) => v !== picked && !pool.deprecated.has(v),
+  );
+  if (spec === "*" && !satisfies(picked, spec)) {
+    const sameRelease = fresh
+      .filter((v) => sameReleaseAs(v, picked))
+      .sort(compare)
+      .at(-1);
+    if (sameRelease !== undefined) {
+      return sameRelease;
     }
   }
-  return max;
+  return maxSatisfyingIn(fresh, spec);
+}
+
+function sameReleaseAs(a: string, b: string): boolean {
+  return (
+    major(a) === major(b) && minor(a) === minor(b) && patch(a) === patch(b)
+  );
 }
 
 /**
