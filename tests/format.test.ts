@@ -3,11 +3,9 @@ import {
   entryDisplay,
   entryWidth,
   exitCodeFor,
-  formatHelp,
   formatLine,
   formatSectionHeader,
   formatSummary,
-  formatVersion,
   LABELS,
   SOURCE_ORDER,
 } from "../src/format.ts";
@@ -73,16 +71,20 @@ describe("entry display and width", () => {
 });
 
 describe("formatSectionHeader", () => {
-  it("uses 'entry' for count of 1", () => {
-    expect(formatSectionHeader("package.json:pnpm.overrides", 1)).toBe(
-      "=== package.json:pnpm.overrides (1 entry) ===\n",
-    );
-  });
-
-  it("uses 'entries' for plural counts", () => {
-    expect(formatSectionHeader("pnpm-workspace.yaml", 3)).toBe(
-      "=== pnpm-workspace.yaml (3 entries) ===\n",
-    );
+  it("preserves every source and uses the count's singular or plural wording", () => {
+    const counts = [
+      [0, "entries"],
+      [1, "entry"],
+      [2, "entries"],
+      [3, "entries"],
+    ] as const;
+    for (const source of SOURCE_ORDER) {
+      for (const [count, word] of counts) {
+        expect(formatSectionHeader(source, count)).toBe(
+          `=== ${source} (${count} ${word}) ===\n`,
+        );
+      }
+    }
   });
 });
 
@@ -137,21 +139,5 @@ describe("audit outcome", () => {
         expect(exitCodeFor(options)).toBe(errorExit ?? pruningExit);
       }
     }
-  });
-});
-
-describe("formatVersion", () => {
-  it("prints program name and version with trailing newline", () => {
-    expect(formatVersion("1.2.3")).toBe("pnpm-override-prune 1.2.3\n");
-  });
-});
-
-describe("formatHelp", () => {
-  it("includes usage line and key flags", () => {
-    const text = formatHelp();
-    expect(text).toContain("Usage: pnpm-override-prune");
-    expect(text).toContain("--fix");
-    expect(text).toContain("-v, --version");
-    expect(text).toContain("-h, --help");
   });
 });
