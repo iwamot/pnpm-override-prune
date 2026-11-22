@@ -84,56 +84,91 @@ const PKG_OVERRIDE = (key: string, spec: string): Override => ({
 });
 
 describe("gatherSpecsForTarget", () => {
-  it("collects specs from workspace direct deps", () => {
-    const lockfile = makeLockfile({});
-    const direct = makeWorkspaceDirectDeps({ foo: "^1.0.0" });
-    expect(gatherSpecsForTarget("foo", lockfile, direct, new Map())).toEqual({
-      specs: ["^1.0.0"],
-      protocolSpecs: [],
-    });
-  });
-
-  it("sets aside workspace direct deps with protocol-prefixed specs", () => {
-    const lockfile = makeLockfile({});
-    const direct = makeWorkspaceDirectDeps({ foo: "workspace:*" });
-    expect(gatherSpecsForTarget("foo", lockfile, direct, new Map())).toEqual({
-      specs: [],
-      protocolSpecs: ["workspace:*"],
-    });
-  });
-
-  it("collects specs from transitive parents via registry data", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        target: [
-          { parent: "parentA@1.0.0", resolved: "1.0.0" },
-          { parent: "parentB@2.0.0", resolved: "1.0.0" },
-        ],
-      },
-    });
-    const registry = new Map<string, PackageMetadata>([
-      ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.0.0" } })],
-      ["parentB", makeMetadata("parentB", { "2.0.0": { target: "<2.0.0" } })],
-    ]);
-    expect(
-      gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
-    ).toEqual({ specs: [">=1.0.0", "<2.0.0"], protocolSpecs: [] });
-  });
-
-  it("combines direct and transitive specs", () => {
-    const lockfile = makeLockfile({
-      transitive: {
-        target: [{ parent: "parentA@1.0.0", resolved: "1.5.0" }],
-      },
-    });
-    const direct = makeWorkspaceDirectDeps({ target: "^1.0.0" });
-    const registry = new Map<string, PackageMetadata>([
-      ["parentA", makeMetadata("parentA", { "1.0.0": { target: ">=1.2.0" } })],
-    ]);
-    expect(gatherSpecsForTarget("target", lockfile, direct, registry)).toEqual({
-      specs: ["^1.0.0", ">=1.2.0"],
-      protocolSpecs: [],
-    });
+  it("collects each target's direct and transitive constraints while separating direct protocols", () => {
+    const directCases = [
+      { spec: "^1.0.0", protocol: false },
+      { spec: "workspace:*", protocol: true },
+      { spec: "catalog:", protocol: true },
+    ];
+    const parentCases = [
+      { name: "@scope/parent", version: "1.0.0", spec: "^1.0.0" },
+      { name: "parentB", version: "2.0.0", spec: "<3.0.0" },
+    ];
+    for (const target of ["foo", "@scope/target"]) {
+      for (const decoration of ["", "(peer@4.0.0)"]) {
+        const registry = new Map(
+          parentCases.map(
+            ({ name, version, spec }) =>
+              [
+                name,
+                makeMetadata(name, {
+                  [version]: { [target]: spec, unrelated: "^9.0.0" },
+                }),
+              ] as const,
+          ),
+        );
+        for (
+          let directMask = 0;
+          directMask < 2 ** directCases.length;
+          directMask++
+        ) {
+          const selectedDirect = directCases.filter(
+            (_, index) => (directMask & (1 << index)) !== 0,
+          );
+          const direct = new Map<string, DirectDep[]>([
+            [
+              target,
+              selectedDirect.map(({ spec }, index) => ({
+                importerKey: `packages/${index}`,
+                depType: "dependencies",
+                spec,
+              })),
+            ],
+          ]);
+          for (
+            let parentMask = 0;
+            parentMask < 2 ** parentCases.length;
+            parentMask++
+          ) {
+            const selectedParents = parentCases.filter(
+              (_, index) => (parentMask & (1 << index)) !== 0,
+            );
+            const lockfile = makeLockfile({
+              transitive: {
+                [target]: selectedParents.map(({ name, version }) => ({
+                  parent: `${name}@${version}${decoration}`,
+                  resolved: "5.0.0",
+                })),
+              },
+            });
+            const actual = gatherSpecsForTarget(
+              target,
+              lockfile,
+              direct,
+              registry,
+            );
+            expect(new Set(actual.specs)).toEqual(
+              new Set([
+                ...selectedDirect
+                  .filter(({ protocol }) => !protocol)
+                  .map(({ spec }) => spec),
+                ...selectedParents.map(({ spec }) => spec),
+              ]),
+            );
+            expect(new Set(actual.protocolSpecs)).toEqual(
+              new Set(
+                selectedDirect
+                  .filter(({ protocol }) => protocol)
+                  .map(({ spec }) => spec),
+              ),
+            );
+            expect(
+              gatherSpecsForTarget("absent", lockfile, direct, registry),
+            ).toEqual({ specs: [], protocolSpecs: [] });
+          }
+        }
+      }
+    }
   });
 
   it("skips parents whose snapshot key cannot be parsed", () => {
@@ -183,12 +218,6 @@ describe("gatherSpecsForTarget", () => {
     ]);
     expect(
       gatherSpecsForTarget("target", lockfile, NO_DIRECT, registry),
-    ).toEqual({ specs: [], protocolSpecs: [] });
-  });
-
-  it("returns nothing when target is not present anywhere", () => {
-    expect(
-      gatherSpecsForTarget("missing", makeLockfile({}), NO_DIRECT, new Map()),
     ).toEqual({ specs: [], protocolSpecs: [] });
   });
 
